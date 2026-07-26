@@ -6,7 +6,7 @@ dedupe 1 ครั้ง/เที่ยว, ยิง Telegram + บันท�
 รัน: python3 flight_watcher.py   (Ctrl+C ออก)
 walk-before-run: ทดสอบบนสถานีบ้านก่อน แล้วย้าย reference ไป OPC ทีหลัง
 """
-import socket, time, math, sqlite3, urllib.request, urllib.parse
+import socket, time, math, sqlite3, urllib.request, urllib.parse, json, os
 
 # ---------- config ----------
 HOST, PORT = "127.0.0.1", 30003
@@ -17,6 +17,9 @@ MAX_RANGE_NM  = 250
 CLEAR_SEC     = 300                       # ไม่เห็นเกินนี้ = ลบ state (ให้ arrival รอบใหม่ยิงได้อีก)
 ENV_FILE      = "/etc/fr24-watchdog.env"  # reuse TG_API / TG_CHAT ตัวเดิม
 DB_FILE       = "/home/arin/flightwatch.db"
+INBOUND_FILE  = "/run/flight-watcher/inbound.json"  # Pixoo THA-inbound page อ่านไฟล์นี้ (RuntimeDirectory)
+INBOUND_MAX_MIN = 90                      # เขียนให้ Pixoo เฉพาะ ETA <= นี้ (ไกลกว่านั้นยังไม่โชว์)
+INBOUND_WRITE_SEC = 10                    # throttle การเขียน inbound.json
 FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15}
 
 # ---------- Telegram (reuse env เดิม) ----------
@@ -141,11 +144,41 @@ def prune():
     for h in [h for h, p in flights.items() if now - p.get("ts", 0) > CLEAR_SEC]:
         del flights[h]
 
+def current_inbound():
+    """THA inbound ที่ ETA น้อยสุด สำหรับโชว์บน Pixoo — แยกจาก alert logic
+    (โชว์ได้แม้ยัง > ETA_ALERT_MIN และแม้ notified ไปแล้ว)"""
+    best = None
+    for hexid, p in flights.items():
+        if not p.get("callsign", "").strip().startswith(WATCH_PREFIX):
+            continue
+        if p.get("dist") is None or p["dist"] > MAX_RANGE_NM or not is_inbound(p):
+            continue
+        e = eta_min(p)
+        if e is None or e > INBOUND_MAX_MIN:
+            continue
+        if best is None or e < best["eta_min"]:
+            best = {"flight": p["callsign"].strip(), "eta_min": round(e, 1),
+                    "dist_nm": round(p["dist"], 1), "alt": p.get("alt"),
+                    "gs": p.get("gs"), "hex": hexid, "ts": time.time()}
+    return best
+
+def write_inbound():
+    """atomic write inbound.json (flight=None = ไม่มี THA inbound ตอนนี้)"""
+    data = current_inbound() or {"flight": None, "ts": time.time()}
+    try:
+        os.makedirs(os.path.dirname(INBOUND_FILE), exist_ok=True)
+        tmp = INBOUND_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, INBOUND_FILE)
+    except OSError as e:
+        print("inbound write skipped:", e)   # เช่น รัน manual ไม่มี /run/flight-watcher
+
 # ---------- main ----------
 def main():
     print(f"flight_watcher: THA inbound VTBS, alert ETA<={ETA_ALERT_MIN}m "
           f"| TG={'on' if TG_API else 'OFF'}")
-    last_prune = 0
+    last_prune = last_inbound = 0
     while True:
         try:
             s = socket.create_connection((HOST, PORT)); s.settimeout(30)
@@ -160,6 +193,8 @@ def main():
                     parse(line.strip())
                 if time.time() - last_prune > 30:
                     prune(); last_prune = time.time()
+                if time.time() - last_inbound > INBOUND_WRITE_SEC:
+                    write_inbound(); last_inbound = time.time()
         except (OSError, ConnectionError) as e:
             print("reconnect in 5s:", e); time.sleep(5)
 

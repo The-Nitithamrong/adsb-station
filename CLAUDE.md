@@ -34,10 +34,17 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `watchdog/fr24-watchdog.sh` — health check + escalation (L1 restart → L2 uhubctl → L3 alert)
   + healthchecks.io heartbeat. Runs via systemd timer every 5 min.
 - `flightwatch/flight_watcher.py` — 30003 → THA inbound VTBS → ETA≤30m → dedupe → Telegram + SQLite.
+  Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page.
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
-  page registry, push loop. Needs PixelOperator*.ttf in pixoo/.
+  page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
 - `systemd/*` — unit files for each service.
+
+## Runtime data contract (JSON in /run, world-readable — NOT secret)
+- `/run/fr24-watchdog/status.json` — written by watchdog each run (root; chmod 644 so pixoo/arin reads):
+  `{ts, health: ok|recovering|dead, msg_per_s, aircraft}`. Pixoo derives `stale` from `ts` age.
+- `/run/flight-watcher/inbound.json` — written by flight_watcher (arin; via `RuntimeDirectory=flight-watcher`):
+  `{ts, flight, eta_min, dist_nm, alt, gs, hex}` or `{ts, flight: null}` when no THA inbound.
 
 ## Conventions / guardrails
 - SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL). NEVER commit .env or *.db.
@@ -51,6 +58,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 2. Tune inbound filter + ETA vs real THA arrivals; set DEST_LAT/LON to exact OPC coords when known.
 3. Add LINE OA notify alongside Telegram.
 4. Add SQLite → Dataverse outbox forwarder (survive connectivity gaps).
-5. Pixoo: have watchdog write status.json each run; feeder page reads it; add a THA-inbound page.
+5. ✅ DONE — watchdog writes status.json; feeder page reads it; THA-inbound page added
+   (flight_watcher writes inbound.json). Remaining polish: tune THA page thresholds vs real arrivals.
 6. Off-grid OPC station: solar+battery, 4G router, self power-monitoring, hardware watchdog,
    safe low-battery shutdown.
