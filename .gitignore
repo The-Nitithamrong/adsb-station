@@ -6,3 +6,8 @@ preview.png
 # python
 __pycache__/
 *.pyc
+# home assistant / mosquitto runtime (config + secrets — อย่า commit)
+deploy/homeassistant/config/
+deploy/homeassistant/mosquitto/data/
+deploy/homeassistant/mosquitto/log/
+deploy/homeassistant/mosquitto/config/passwd
