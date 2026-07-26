@@ -41,6 +41,12 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   STAR entry gates (all FL180, coords from the RNAV chart) are in `STAR_FIXES`:
   WILLA/NORTA/EASTE/TUMGA/LEBIM; a flight passing within `STAR_FIX_RADIUS_NM` is tagged with its gate.
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
+- `flightwatch/outbox.py` (+ `systemd/adsb-outbox.{service,timer}`) — OPTIONAL forwarder: sends new
+  `events`+`tracks` rows to a cloud sink (Cloudflare D1 now) every ~10 min. Adds a `sent` column to
+  each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows queue
+  and retry (survives connectivity gaps). D1 side: `uid` PK + `INSERT OR IGNORE` = idempotent on
+  re-send. Pluggable — add a sink `send(table,cols,rows)->count` to `SINKS` (e.g. Dataverse later).
+  D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
 - `systemd/*` — unit files for each service.
@@ -56,7 +62,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `{ts, flight, eta_min, dist_nm, alt, gs, hex}` or `{ts, flight: null}` when no THA inbound.
 
 ## Conventions / guardrails
-- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL). NEVER commit .env or *.db.
+- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*). NEVER commit .env or *.db.
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
   - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
     `git pull` does NOT update those. After changing them, `cp` into place + restart / `daemon-reload`.
@@ -75,7 +81,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
    touchdown (16000/750≈21m, 18000/750≈24m). `tracks` + `track_stats.py` collect ground truth to
    re-tune ETA_DESCENT_FPM. Signal isn't continuous to the ground — `alt_at_min` = lowest we still receive.
 3. Add LINE OA notify alongside Telegram.
-4. Add SQLite → Dataverse outbox forwarder (survive connectivity gaps).
+4. ✅ Outbox forwarder (survive connectivity gaps) — `outbox.py` → Cloudflare D1 (pluggable sink;
+   chose D1 over Dataverse: source is SQLite so 1:1 + bearer-token auth vs OAuth/app-registration).
+   Add a Dataverse sink to `SINKS` later if the data must drive Power Platform apps/flows.
 5. ✅ DONE — watchdog writes status.json; feeder page reads it; THA-inbound page added
    (flight_watcher writes inbound.json). Remaining polish: tune THA page thresholds vs real arrivals.
 6. Off-grid OPC station: solar+battery, 4G router, self power-monitoring, hardware watchdog,
