@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """track_stats.py — สรุปสถิติจากตาราง tracks (flight_watcher บันทึกตอนเครื่องหายไป)
 
-ตอบ 2 คำถาม:
-  1) ใกล้ VTBS สุด รับสัญญาณได้ที่ความสูงเท่าไหร่ (coverage floor)
-  2) เวลาจริง (alert → สัญญาณหลุด) เทียบ ETA เส้นตรงที่คำนวณ — ไว้ calibrate
-     (straight-line ETA เชื่อไม่ได้: STAR ไม่บินตรงเข้า + gs ลดตอน descend)
+ตอบ:
+  1) coverage floor — ใกล้ VTBS แค่ไหน รับได้ต่ำสุดเท่าไหร่ + จุดสัญญาณหลุดทั่วไป
+     (obs จริง: หลุด ~10nm / 2-3000ft ≈ 3 นาทีก่อนแตะพื้น)
+  2) STAR gate → touchdown: เวลาจริงต่อ gate (บวก final ที่มองไม่เห็น ~last_alt/750)
+  3) ETA ที่คำนวณตอน alert vs เวลาจริงถึงพื้น — ไว้จูน ETA_DESCENT_FPM
 
 รัน:  python3 track_stats.py           # ทุกเที่ยว
       python3 track_stats.py THA       # เฉพาะ callsign ขึ้นต้น THA
@@ -13,6 +14,8 @@ stdlib ล้วน (sqlite3) — ไม่มี pip dep.
 import sqlite3, sys, statistics
 
 DB = "/home/arin/flightwatch.db"
+DESCENT_FPM = 750   # ต้องตรงกับ ETA_DESCENT_FPM ใน flight_watcher — ใช้ประมาณ "final ที่มองไม่เห็น"
+#   obs จริง: สัญญาณหลุด ~10nm / 2-3000ft ≈ 3 นาทีก่อนแตะพื้น (2500/750=3.3m ✓) → บวกกลับให้เป็นเวลาถึงพื้น
 COLS = ["hex", "flight", "watched", "first_ts", "last_ts", "samples",
         "min_dist", "alt_at_min", "min_alt", "last_dist", "last_alt",
         "max_dist", "alert_ts", "alert_eta", "star_fix", "star_alt", "star_ts"]
@@ -57,39 +60,48 @@ def main():
         low = min(havealt, key=lambda d: d["alt_at_min"])
         print(f"alt ต่ำสุดที่เคยรับใกล้สนาม: {low['alt_at_min']} ft @ {low['min_dist']} nm ({low['flight'] or low['hex']})")
 
-    # 2) STAR gate — เวลาจริงจากจุดเข้า STAR ถึงสัญญาณหลุด (anchor ต่อ gate)
+    lost = [d for d in data if d["last_dist"] is not None and d["last_alt"] is not None]
+    if lost:
+        md = statistics.median(d["last_dist"] for d in lost)
+        ma = statistics.median(d["last_alt"] for d in lost)
+        print(f"จุดสัญญาณหลุดทั่วไป (median): {md:.0f} nm / {int(ma)} ft"
+              f"  → เหลือ ~{ma / DESCENT_FPM:.1f} นาทีถึงพื้น (final ที่มองไม่เห็น)")
+
+    # 2) STAR gate — เวลาจริงจากจุดเข้า STAR ถึงพื้น (= ถึงสัญญาณหลุด + final ~last_alt/750)
     gated = [d for d in data if d["star_ts"] and d["last_ts"] and d["last_ts"] > d["star_ts"]]
-    print("\n=== STAR gate → สัญญาณหลุด: เวลาจริง (นาที) + alt ตอนผ่าน gate ===")
+    print("\n=== STAR gate → touchdown: เวลาจริง (บวก final ที่มองไม่เห็น) + alt ตอนผ่าน gate ===")
     if gated:
-        print(f"{'gate':>6} | {'n':>3} | {'เวลา median':>11} | {'ช่วง':>9} | {'alt@gate med':>12}")
+        print(f"{'gate':>6} | {'n':>3} | {'→หลุด':>7} | {'→พื้น≈':>7} | {'ช่วง→พื้น':>11} | {'alt@gate':>9}")
         by_gate = {}
         for d in gated:
             by_gate.setdefault(d["star_fix"], []).append(d)
         for gate, ds in sorted(by_gate.items(), key=lambda kv: -len(kv[1])):
-            mins = sorted((d["last_ts"] - d["star_ts"]) / 60.0 for d in ds)
+            loss = [(d["last_ts"] - d["star_ts"]) / 60.0 for d in ds]
+            td = sorted(m + (d["last_alt"] or 0) / DESCENT_FPM for m, d in zip(loss, ds, strict=True))
             alts = [d["star_alt"] for d in ds if d["star_alt"] is not None]
-            amed = f"{int(statistics.median(alts))} ft" if alts else "-"
-            print(f"{gate:>6} | {len(ds):>3} | {statistics.median(mins):>9.1f}m | "
-                  f"{mins[0]:>3.0f}-{mins[-1]:<3.0f}m | {amed:>12}")
-        print("หมายเหตุ: เวลานี้ยังไม่รวม final หลังสัญญาณหลุด — เอาไว้เทียบ/จูน ETA_DESCENT_FPM ต่อ gate")
+            amed = f"{int(statistics.median(alts))}ft" if alts else "-"
+            print(f"{gate:>6} | {len(ds):>3} | {statistics.median(loss):>5.1f}m | "
+                  f"{statistics.median(td):>5.1f}m | {td[0]:>3.0f}-{td[-1]:<3.0f}m | {amed:>9}")
+        print("→พื้น≈ = เวลาถึง touchdown (เทียบ anchor ~20-25 นาที/gate ได้ตรง). obs: หลุด ~10nm/2-3000ft")
     else:
         print("(ยังไม่มีเที่ยวที่จับจุดเข้า STAR ได้ — รอเครื่องผ่านใกล้ WILLA/NORTA/EASTE/TUMGA/LEBIM)")
 
-    # 3) ETA จริง vs คำนวณ (เฉพาะเที่ยวที่ alert แล้ว)
+    # 3) ETA คำนวณตอน alert vs เวลาจริงถึงพื้น (= alert→หลุด + final ~last_alt/750)
     alerted = [d for d in data if d["alert_ts"] and d["alert_eta"] and d["last_ts"]]
-    print("\n=== เวลาจริง (alert → สัญญาณหลุด) vs ETA เส้นตรง ===")
+    print("\n=== ETA ที่คำนวณตอน alert vs เวลาจริงถึงพื้น ===")
     if not alerted:
         print("(ยังไม่มีเที่ยวที่ alert แล้วถูกบันทึก)")
         return
-    print(f"{'flight':>8} | {'ETAคำนวณ':>8} | {'จริง≥':>6} | {'หลุดที่':>16}")
+    print(f"{'flight':>8} | {'ETAคำนวณ':>8} | {'จริง≈':>6} | {'หลุดที่':>16}")
     diffs = []
     for d in sorted(alerted, key=lambda x: x["alert_ts"])[-20:]:
-        actual = (d["last_ts"] - d["alert_ts"]) / 60.0
+        actual = (d["last_ts"] - d["alert_ts"]) / 60.0 + (d["last_alt"] or 0) / DESCENT_FPM
         diffs.append(actual - d["alert_eta"])
         print(f"{(d['flight'] or d['hex']):>8} | {d['alert_eta']:>6.0f}m | {actual:>4.0f}m | "
               f"{(d['last_dist'] or 0):>4.0f}nm/{(d['last_alt'] or 0):>5}ft")
-    print("\nหมายเหตุ: 'จริง' = เวลาถึงตอนสัญญาณหลุด (ยังไม่ถึงพื้น — บวก final อีกนิด)")
-    print(f"เฉลี่ย (จริง − คำนวณ) = {statistics.mean(diffs):+.1f} นาที  (บวก = บินนานกว่าที่คำนวณ)")
+    print("\n'จริง≈' = alert→สัญญาณหลุด + final ที่มองไม่เห็น (~last_alt/750)")
+    print(f"เฉลี่ย (จริง − คำนวณ) = {statistics.mean(diffs):+.1f} นาที  "
+          f"(บวก = บินจริงนานกว่าที่คำนวณ → ลด ETA_DESCENT_FPM)")
 
 
 if __name__ == "__main__":
