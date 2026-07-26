@@ -68,15 +68,14 @@ hc_ping() {  # $1 = "" success | "/fail"  (healthchecks.io external heartbeat)
     [ -n "${HC_URL:-}" ] && curl -fsS -m 10 --retry 2 "${HC_URL}${1:-}" -o /dev/null 2>/dev/null
 }
 
-count_msgs() {  # 1 sample → set LAST_MSGS/LAST_AIRCRAFT, echo จำนวน MSG (contract เดิม)
+sample_feed() {  # 1 sample → set LAST_MSGS + LAST_AIRCRAFT ใน shell ปัจจุบัน
+    # ต้องเรียกตรงๆ (ไม่ผ่าน $(...)) ไม่งั้น global จะถูก set ใน subshell แล้วหาย
     # capture ทั้งหน้าต่างก่อน (timeout ปิด nc แล้วค่อย process) — ไม่โดน buffering-loss
-    # แบบ live pipe เพราะ command substitution รอ output ครบก่อน
     local sample
     sample="$(timeout "$SAMPLE_SECS" nc "$SBS_HOST" "$SBS_PORT" 2>/dev/null)"
-    LAST_MSGS="$(printf '%s\n' "$sample" | grep -c '^MSG' || true)"
+    LAST_MSGS="$(printf '%s\n' "$sample" | grep -c '^MSG' || true)"; LAST_MSGS="${LAST_MSGS:-0}"
     # distinct aircraft = ICAO hex ไม่ซ้ำ (SBS field 5 = f[4] ตาม flight_watcher.py)
-    LAST_AIRCRAFT="$(printf '%s\n' "$sample" | awk -F, '$1=="MSG" && $5!="" {print $5}' | sort -u | grep -c . || true)"
-    echo "$LAST_MSGS"
+    LAST_AIRCRAFT="$(printf '%s\n' "$sample" | awk -F, '$1=="MSG" && $5!="" {print $5}' | sort -u | grep -c . || true)"; LAST_AIRCRAFT="${LAST_AIRCRAFT:-0}"
 }
 
 write_status() {  # $1 = health (ok|recovering|dead) — atomic write ให้ pixoo อ่าน
@@ -88,9 +87,9 @@ write_status() {  # $1 = health (ok|recovering|dead) — atomic write ให้ 
 }
 
 is_healthy() {
-    local n; n="$(count_msgs)"; n="${n:-0}"
-    log "data-flow: $n msgs/${SAMPLE_SECS}s (need >=$MIN_MSGS)"
-    [ "$n" -ge "$MIN_MSGS" ]
+    sample_feed   # เรียกตรงๆ ให้ LAST_MSGS/LAST_AIRCRAFT ติดกลับมาถึง write_status
+    log "data-flow: $LAST_MSGS msgs/${SAMPLE_SECS}s (need >=$MIN_MSGS)"
+    [ "$LAST_MSGS" -ge "$MIN_MSGS" ]
 }
 
 restart_stack() {
