@@ -1,0 +1,22 @@
+# Home Assistant + Mosquitto (MQTT broker) บน Pi ที่รัน ADS-B อยู่
+# ทั้งคู่ network_mode: host — HA ต้องใช้ host เพื่อ discovery/mDNS; mosquitto เปิด 1883 บน host
+# ติดตั้ง: ดู README หัวข้อ "Home Assistant + MQTT"
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    network_mode: host
+    volumes:
+      - ./config:/config                 # HA config (ไม่ขึ้น repo)
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    network_mode: host                   # เปิด listener 1883 บน host
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    restart: unless-stopped

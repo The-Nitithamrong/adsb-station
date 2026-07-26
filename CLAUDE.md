@@ -50,6 +50,11 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
 - `systemd/*` — unit files for each service.
+- `ha/mqtt_publish.py` (+ `systemd/adsb-ha-mqtt.{service,timer}`, `deploy/homeassistant/`) — OPTIONAL:
+  publishes /run status+inbound to MQTT with Home Assistant discovery (retained config + state) every
+  1 min via `mosquitto_pub` (apt mosquitto-clients; stdlib only). HA + Mosquitto run as Docker
+  containers (`deploy/homeassistant/docker-compose.yml`). MQTT creds (`MQTT_HOST/PORT/USER/PASS`) in
+  /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, received count, THA flight/ETA/dist.
 - `deploy/adsb-autoupdate.sh` (+ `systemd/adsb-autoupdate.{service,timer}`) — OPTIONAL: Pi auto-pulls
   `origin/main` every ~10 min (`merge --ff-only`, skips on local conflicts), then syncs
   `/usr/local/bin` + unit files and restarts only the changed services. Runs from `/usr/local/bin`
@@ -62,7 +67,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `{ts, flight, eta_min, dist_nm, alt, gs, hex}` or `{ts, flight: null}` when no THA inbound.
 
 ## Conventions / guardrails
-- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*). NEVER commit .env or *.db.
+- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*). NEVER commit .env or *.db.
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
   - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
     `git pull` does NOT update those. After changing them, `cp` into place + restart / `daemon-reload`.

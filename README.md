@@ -116,6 +116,40 @@ sudo systemctl start adsb-outbox     # ส่งรอบแรกเลย · �
 ```
 (อยู่ในโฟลเดอร์ `systemd/` → auto-update จัดการ restart timer ให้เองเมื่อแก้ในอนาคต)
 
+## Home Assistant + MQTT (optional — ข้อมูล ADS-B เป็น sensor ใน HA)
+
+รัน HA + Mosquitto เป็น Docker container บน Pi (อยู่ร่วมกับ ADS-B) แล้วสถานี publish สถานะเข้า MQTT
+→ HA auto-discovery สร้าง sensor ให้เอง (feeder health/rate/aircraft, THA inbound flight/ETA/dist, จำนวนที่รับได้).
+
+**1. Docker** (ถ้ายังไม่มี): `curl -fsSL https://get.docker.com | sh`
+
+**2. ตั้งรหัส MQTT + start stack**:
+```bash
+cd ~/adsb-station/deploy/homeassistant
+# สร้าง user 'adsb' ให้ broker (ตั้งรหัสเอง)
+docker run --rm -v "$PWD/mosquitto/config:/mosquitto/config" eclipse-mosquitto:2 \
+  mosquitto_passwd -c -b /mosquitto/config/passwd adsb 'YOUR_MQTT_PASS'
+docker compose up -d          # HA :8123, Mosquitto :1883
+```
+
+**3. ตั้ง HA**: เปิด `http://<pi>:8123` → onboarding → Settings → Devices → **Add Integration → MQTT**
+→ broker `127.0.0.1`, port `1883`, user `adsb` + รหัสข้อ 2. sensor จะโผล่เองใต้ device "ADS-B ...".
+
+**4. ให้สถานี publish** — เพิ่มลง `/etc/fr24-watchdog.env`:
+```bash
+MQTT_HOST="127.0.0.1"
+MQTT_PORT="1883"
+MQTT_USER="adsb"
+MQTT_PASS="YOUR_MQTT_PASS"    # เดียวกับข้อ 2
+```
+```bash
+sudo apt install -y mosquitto-clients     # publisher ใช้ mosquitto_pub บน host
+sudo cp ~/adsb-station/systemd/adsb-ha-mqtt.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now adsb-ha-mqtt.timer
+sudo systemctl start adsb-ha-mqtt         # ยิงรอบแรก · ดู log: journalctl -u adsb-ha-mqtt
+```
+(publisher รันจาก repo → auto-update ดูแลให้; unit อยู่ใน `systemd/` → timer restart อัตโนมัติ)
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash

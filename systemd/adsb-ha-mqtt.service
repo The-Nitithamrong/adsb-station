@@ -1,0 +1,9 @@
+[Unit]
+Description=adsb-station -> MQTT (Home Assistant discovery)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=arin
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/ha/mqtt_publish.py
