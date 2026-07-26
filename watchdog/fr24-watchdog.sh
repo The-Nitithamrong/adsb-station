@@ -41,7 +41,12 @@ STATE_DIR=/run/fr24-watchdog
 mkdir -p "$STATE_DIR"
 FAILS_F="$STATE_DIR/fails"
 LASTHARD_F="$STATE_DIR/last_hardalert"
+STATUS_F="$STATE_DIR/status.json"    # อ่านโดย pixoo/main.py (feeder page)
 HOST="$(hostname)"
+
+# ล่าสุดจาก sample รอบนี้ (count_msgs ตั้งค่าให้) → write_status ใช้ต่อ
+LAST_MSGS=0
+LAST_AIRCRAFT=0
 
 log() { echo "$(date '+%T') $*"; }   # stdout → journald เห็นใต้ `journalctl -u` เสมอ (logger บางที attribute ไม่ติด unit)
 
@@ -62,8 +67,22 @@ hc_ping() {  # $1 = "" success | "/fail"  (healthchecks.io external heartbeat)
     [ -n "${HC_URL:-}" ] && curl -fsS -m 10 --retry 2 "${HC_URL}${1:-}" -o /dev/null 2>/dev/null
 }
 
-count_msgs() {  # จำนวนบรรทัด MSG บน SBS port ในหน้าต่าง SAMPLE_SECS
-    timeout "$SAMPLE_SECS" nc "$SBS_HOST" "$SBS_PORT" 2>/dev/null | grep -c '^MSG' || true
+count_msgs() {  # 1 sample → set LAST_MSGS/LAST_AIRCRAFT, echo จำนวน MSG (contract เดิม)
+    # capture ทั้งหน้าต่างก่อน (timeout ปิด nc แล้วค่อย process) — ไม่โดน buffering-loss
+    # แบบ live pipe เพราะ command substitution รอ output ครบก่อน
+    local sample
+    sample="$(timeout "$SAMPLE_SECS" nc "$SBS_HOST" "$SBS_PORT" 2>/dev/null)"
+    LAST_MSGS="$(printf '%s\n' "$sample" | grep -c '^MSG' || true)"
+    # distinct aircraft = ICAO hex ไม่ซ้ำ (SBS field 5 = f[4] ตาม flight_watcher.py)
+    LAST_AIRCRAFT="$(printf '%s\n' "$sample" | awk -F, '$1=="MSG" && $5!="" {print $5}' | sort -u | grep -c . || true)"
+    echo "$LAST_MSGS"
+}
+
+write_status() {  # $1 = health (ok|recovering|dead) — atomic write ให้ pixoo อ่าน
+    local rate=$(( LAST_MSGS / SAMPLE_SECS ))
+    printf '{"ts":%s,"health":"%s","msg_per_s":%s,"aircraft":%s}\n' \
+        "$(date +%s)" "$1" "$rate" "${LAST_AIRCRAFT:-0}" \
+        > "$STATUS_F.tmp" && mv -f "$STATUS_F.tmp" "$STATUS_F"
 }
 
 is_healthy() {
@@ -88,6 +107,7 @@ usb_powercycle() {
 # ============================ main ============================
 if is_healthy; then
     echo 0 > "$FAILS_F"
+    write_status "ok"
     hc_ping ""                # heartbeat: ยังมีชีวิต + feed อยู่
     exit 0
 fi
@@ -95,6 +115,7 @@ fi
 fails=$(( $(cat "$FAILS_F" 2>/dev/null || echo 0) + 1 ))
 echo "$fails" > "$FAILS_F"
 log "UNHEALTHY #$fails / threshold $THRESHOLD"
+write_status "recovering"     # feed ตก แต่ยังไม่ถึงเกณฑ์ลงมือ → เหลือง
 hc_ping "/fail"
 
 [ "$fails" -lt "$THRESHOLD" ] && exit 0   # รอยืนยันก่อนลงมือ (กัน false positive ตอนฟ้าว่าง)
@@ -107,6 +128,7 @@ restart_stack
 sleep "$SETTLE_SECS"
 if is_healthy; then
     echo 0 > "$FAILS_F"
+    write_status "ok"
     notify "✅ FR24 watchdog ($HOST) — L1 restart สำเร็จ feed กลับมาแล้ว
 $(date '+%F %T')"
     hc_ping ""; exit 0
@@ -121,12 +143,14 @@ restart_stack
 sleep "$SETTLE_SECS"
 if is_healthy; then
     echo 0 > "$FAILS_F"
+    write_status "ok"
     notify "✅ FR24 watchdog ($HOST) — L2 USB power-cycle สำเร็จ feed กลับมาแล้ว
 $(date '+%F %T')"
     hc_ping ""; exit 0
 fi
 
 # ---- L3: ยังตาย — hard alert (rate-limited) ----
+write_status "dead"           # L1+L2 กู้ไม่ขึ้น → แดง
 now=$(date +%s)
 last=$(cat "$LASTHARD_F" 2>/dev/null || echo 0)
 if [ $(( now - last )) -ge "$HARDALERT_COOLDOWN" ]; then
