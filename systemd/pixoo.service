@@ -1,0 +1,15 @@
+[Unit]
+Description=Pixoo 64 status display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arin
+WorkingDirectory=/home/arin/adsb-station/pixoo
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/pixoo/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

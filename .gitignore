@@ -1,0 +1,8 @@
+# ของลับ + ข้อมูล — อย่า commit
+*.env
+fr24-watchdog.env
+*.db
+preview.png
+# python
+__pycache__/
+*.pyc

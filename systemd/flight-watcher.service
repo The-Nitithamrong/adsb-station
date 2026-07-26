@@ -1,0 +1,15 @@
+[Unit]
+Description=THA inbound flight watcher (ADS-B -> Telegram + SQLite)
+After=network-online.target dump1090-mutability.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arin
+WorkingDirectory=/home/arin/adsb-station/flightwatch
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/flightwatch/flight_watcher.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

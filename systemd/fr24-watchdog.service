@@ -1,0 +1,8 @@
+[Unit]
+Description=FR24 feeder health watchdog
+After=fr24feed.service
+
+[Service]
+TimeoutStartSec=600
+Type=oneshot
+ExecStart=/usr/local/bin/fr24-watchdog.sh

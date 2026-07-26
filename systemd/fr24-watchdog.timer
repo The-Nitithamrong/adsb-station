@@ -1,0 +1,10 @@
+[Unit]
+Description=Run FR24 feeder watchdog every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=fr24-watchdog.service
+
+[Install]
+WantedBy=timers.target
