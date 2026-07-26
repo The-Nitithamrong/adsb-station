@@ -20,6 +20,8 @@ DB_FILE       = "/home/arin/flightwatch.db"
 INBOUND_FILE  = "/run/flight-watcher/inbound.json"  # Pixoo THA-inbound page อ่านไฟล์นี้ (RuntimeDirectory)
 INBOUND_MAX_MIN = 90                      # เขียนให้ Pixoo เฉพาะ ETA <= นี้ (ไกลกว่านั้นยังไม่โชว์)
 INBOUND_WRITE_SEC = 10                    # throttle การเขียน inbound.json
+TRACK_NEAR_NM = 60                        # บันทึก track เฉพาะเที่ยวที่เข้าใกล้ VTBS <= นี้ (approach/arrival; กัน overflight ไกล)
+TRACK_MIN_SAMPLES = 5                     # ต้องมี position fix อย่างน้อยเท่านี้ถึงบันทึก (กัน noise)
 FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15}
 
 # ---------- Telegram (reuse env เดิม) ----------
@@ -54,6 +56,14 @@ def notify(text):
 db = sqlite3.connect(DB_FILE)
 db.execute("""CREATE TABLE IF NOT EXISTS events(
     ts INTEGER, flight TEXT, hex TEXT, eta_min REAL, dist_nm REAL, gs INTEGER, alt INTEGER)""")
+# tracks = สรุป 1 แถว/เที่ยว ตอนเครื่องหายไป — ไว้ calibrate ETA จริง + หา coverage floor
+# (straight-line ETA เชื่อไม่ได้: STAR ไม่บินตรงเข้า + gs ลดตอน descend)
+db.execute("""CREATE TABLE IF NOT EXISTS tracks(
+    hex TEXT, flight TEXT, watched INTEGER,
+    first_ts INTEGER, last_ts INTEGER, samples INTEGER,
+    min_dist_nm REAL, alt_at_min INTEGER, min_alt INTEGER,
+    last_dist_nm REAL, last_alt INTEGER, max_dist_nm REAL,
+    alert_ts INTEGER, alert_eta REAL)""")
 db.commit()
 
 # ---------- helpers ----------
@@ -90,7 +100,10 @@ def parse(line):
         return
     p = flights.setdefault(hexid, {"callsign": "", "alt": None, "gs": None,
                                    "lat": None, "lon": None, "dist": None,
-                                   "dist_hist": [], "alt_hist": [], "notified": False})
+                                   "dist_hist": [], "alt_hist": [], "notified": False,
+                                   "first_ts": None, "samples": 0, "min_dist": None,
+                                   "alt_at_min": None, "min_alt": None, "max_dist": None,
+                                   "alert_ts": None, "alert_eta": None})
     for k, i in FIELDS.items():
         v = f[i].strip()
         if not v:
@@ -111,7 +124,23 @@ def parse(line):
         p["dist_hist"] = (p["dist_hist"] + [p["dist"]])[-6:]
         if p["alt"] is not None:
             p["alt_hist"] = (p["alt_hist"] + [p["alt"]])[-6:]
+        accumulate(p)
         check(hexid, p)
+
+def accumulate(p):
+    """สะสมสถิติ track: ระยะใกล้สุด + alt ที่จุดนั้น, alt ต่ำสุด, ระยะไกลสุด, จำนวน fix"""
+    if p["first_ts"] is None:
+        p["first_ts"] = p["ts"]
+    p["samples"] += 1
+    d = p["dist"]
+    if p["min_dist"] is None or d < p["min_dist"]:
+        p["min_dist"] = d
+        p["alt_at_min"] = p.get("alt")     # ← ความสูงตอนเข้าใกล้สนามสุด = coverage floor
+    if p["max_dist"] is None or d > p["max_dist"]:
+        p["max_dist"] = d
+    a = p.get("alt")
+    if a is not None and (p["min_alt"] is None or a < p["min_alt"]):
+        p["min_alt"] = a
 
 def check(hexid, p):
     cs = p["callsign"].strip()
@@ -129,6 +158,7 @@ def check(hexid, p):
           f"FL{(p['alt'] or 0)//100:03d}  {p['gs']}kt")
     if e <= ETA_ALERT_MIN:
         p["notified"] = True
+        p["alert_ts"] = int(time.time()); p["alert_eta"] = round(e, 1)   # ไว้เทียบ ETA จริงใน tracks
         msg = (f"✈️ {cs} inbound VTBS\n"
                f"ETA ~{e:.0f} นาที | {p['dist']:.0f} nm | "
                f"FL{(p['alt'] or 0)//100:03d} | {p['gs']} kt\n"
@@ -139,9 +169,27 @@ def check(hexid, p):
                     round(p["dist"], 1), p["gs"], p["alt"]))
         db.commit()
 
+def record_track(hexid, p):
+    """บันทึก 1 แถวลง tracks ตอนเครื่องหายไป — เฉพาะเที่ยวที่เข้าใกล้สนามพอควร"""
+    if p.get("samples", 0) < TRACK_MIN_SAMPLES or p.get("min_dist") is None:
+        return
+    if p["min_dist"] > TRACK_NEAR_NM:      # ไม่เคยเข้าใกล้ VTBS → ไม่เก็บ (overflight ไกล)
+        return
+    cs = p.get("callsign", "").strip()
+    db.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+        hexid, cs, 1 if cs.startswith(WATCH_PREFIX) else 0,
+        int(p["first_ts"]) if p.get("first_ts") else None,
+        int(p.get("ts", time.time())), p["samples"],
+        round(p["min_dist"], 1), p.get("alt_at_min"), p.get("min_alt"),
+        round(p["dist"], 1) if p.get("dist") is not None else None, p.get("alt"),
+        round(p["max_dist"], 1) if p.get("max_dist") is not None else None,
+        p.get("alert_ts"), p.get("alert_eta")))
+    db.commit()
+
 def prune():
     now = time.time()
     for h in [h for h, p in flights.items() if now - p.get("ts", 0) > CLEAR_SEC]:
+        record_track(h, flights[h])
         del flights[h]
 
 def current_inbound():

@@ -34,7 +34,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `watchdog/fr24-watchdog.sh` — health check + escalation (L1 restart → L2 uhubctl → L3 alert)
   + healthchecks.io heartbeat. Runs via systemd timer every 5 min.
 - `flightwatch/flight_watcher.py` — 30003 → THA inbound VTBS → ETA≤30m → dedupe → Telegram + SQLite.
-  Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page.
+  Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page,
+  and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
+- `flightwatch/track_stats.py` — reads `tracks`: coverage floor (how low we still receive near VTBS)
+  + actual time (alert→signal-loss) vs the straight-line ETA. `python3 track_stats.py [THA]`.
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
@@ -60,6 +63,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 ## Roadmap (prioritized)
 1. Validate THA detection from home, then run flight_watcher as the provided systemd service.
 2. Tune inbound filter + ETA vs real THA arrivals; set DEST_LAT/LON to exact OPC coords when known.
+   NOTE: straight-line ETA (dist/gs) is unreliable — STAR arrivals don't fly straight in and gs drops
+   during descent. `tracks` table + `track_stats.py` collect ground truth to calibrate. Also: signal
+   is not continuous to the ground (coverage floor) — `alt_at_min` shows the lowest we still receive.
 3. Add LINE OA notify alongside Telegram.
 4. Add SQLite → Dataverse outbox forwarder (survive connectivity gaps).
 5. ✅ DONE — watchdog writes status.json; feeder page reads it; THA-inbound page added
