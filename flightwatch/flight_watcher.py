@@ -34,6 +34,7 @@ DB_FILE       = "/home/arin/flightwatch.db"
 INBOUND_FILE  = "/run/flight-watcher/inbound.json"  # Pixoo THA-inbound page อ่านไฟล์นี้ (RuntimeDirectory)
 INBOUND_MAX_MIN = 90                      # เขียนให้ Pixoo เฉพาะ ETA <= นี้ (ไกลกว่านั้นยังไม่โชว์)
 INBOUND_WRITE_SEC = 10                    # throttle การเขียน inbound.json
+LIST_MAX = 5                              # กี่เครื่องใน list บน Pixoo (แถวที่พอดีจอ)
 TRACK_NEAR_NM = 60                        # บันทึก track เฉพาะเที่ยวที่เข้าใกล้ VTBS <= นี้ (approach/arrival; กัน overflight ไกล)
 TRACK_MIN_SAMPLES = 5                     # ต้องมี position fix อย่างน้อยเท่านี้ถึงบันทึก (กัน noise)
 FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15}
@@ -255,9 +256,24 @@ def current_inbound():
                     "gs": p.get("gs"), "hex": hexid, "ts": time.time()}
     return best
 
+def flights_list():
+    """ทุกเครื่องที่มี position ตอนนี้ เรียงใกล้→ไกล (สำหรับหน้า list บน Pixoo)"""
+    out = []
+    for hexid, p in flights.items():
+        if p.get("dist") is None:
+            continue
+        cs = (p.get("callsign", "").strip() or hexid.upper())[:6]
+        out.append({"cs": cs, "dist": round(p["dist"]), "fl": (p.get("alt") or 0) // 100})
+    out.sort(key=lambda x: x["dist"])
+    return out
+
 def write_inbound():
-    """atomic write inbound.json (flight=None = ไม่มี THA inbound ตอนนี้)"""
-    data = current_inbound() or {"flight": None, "ts": time.time()}
+    """atomic write inbound.json: THA inbound (soonest) + list เครื่องที่รับได้ทั้งหมด"""
+    data = current_inbound() or {"flight": None}
+    data["ts"] = time.time()
+    lst = flights_list()
+    data["nrx"] = len(lst)               # จำนวนเครื่องที่รับได้ทั้งหมด
+    data["list"] = lst[:LIST_MAX]        # เฉพาะที่โชว์บนจอ
     try:
         os.makedirs(os.path.dirname(INBOUND_FILE), exist_ok=True)
         tmp = INBOUND_FILE + ".tmp"

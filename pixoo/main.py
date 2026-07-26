@@ -31,15 +31,15 @@ def read_status():
 
 
 def read_inbound():
-    # THA inbound ล่าสุด (flight=None หรือ stale = ไม่มี → page โชว์ "no inbound")
+    # inbound.json ทั้งก้อน (THA soonest + list เครื่องที่รับได้) — {} ถ้า stale/อ่านไม่ได้
     try:
         with open(THA_F) as f:
             d = json.load(f)
-        if not d.get("flight") or time.time() - d.get("ts", 0) > THA_STALE_SEC:
-            return None
+        if time.time() - d.get("ts", 0) > THA_STALE_SEC:
+            return {}
         return d
     except Exception:
-        return None
+        return {}
 
 
 def main():
@@ -47,7 +47,10 @@ def main():
     tick = 0
     while True:
         data = read_status()
-        data["tha"] = read_inbound()
+        inb = read_inbound()
+        data["tha"] = inb if inb.get("flight") else None   # THA inbound (หรือ None)
+        data["flights"] = inb.get("list", [])              # list เครื่องที่รับได้
+        data["nrx"] = inb.get("nrx", 0)
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()

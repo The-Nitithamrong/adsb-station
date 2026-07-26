@@ -54,5 +54,24 @@ def tha_inbound(d, data):
     R.text(d, (60, 54), f"{dist}nm", "small", R.PALETTE["label"], anchor="ra")
 
 
+def flights_list(d, data):
+    """หน้า list เครื่องที่รับได้ตอนนี้ (font 3x5) — callsign · ระยะ nm · FL, เรียงใกล้→ไกล"""
+    lst = data.get("flights") or []
+    nrx = data.get("nrx", len(lst))
+
+    # หัว: AIR + จำนวนเครื่องที่รับได้ทั้งหมด (amber)
+    R.text(d, (3, 28), f"AIR {nrx}", "tiny", R.PALETTE["title"], anchor="la")
+    if not lst:
+        R.text(d, (3, 40), "NO AIRCRAFT", "tiny", R.PALETTE["label"], anchor="la")
+        return
+
+    # แถวละเครื่อง (สูงสุด 5) — callsign ซ้าย, ระยะ กลาง, FL ขวา
+    for i, fl in enumerate(lst[:5]):
+        y = 34 + i * 6
+        R.text(d, (3, y),  fl["cs"],               "tiny", R.PALETTE["aircraft"], anchor="la")
+        R.text(d, (34, y), str(fl.get("dist", 0)), "tiny", R.PALETTE["label"], anchor="la")
+        R.text(d, (48, y), f"{fl.get('fl', 0):03d}", "tiny", R.PALETTE["label"], anchor="la")
+
+
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
-PAGES = [feeder_status, tha_inbound]
+PAGES = [feeder_status, tha_inbound, flights_list]
