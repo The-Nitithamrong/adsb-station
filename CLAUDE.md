@@ -44,6 +44,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
 - `systemd/*` — unit files for each service.
+- `deploy/adsb-autoupdate.sh` (+ `systemd/adsb-autoupdate.{service,timer}`) — OPTIONAL: Pi auto-pulls
+  `origin/main` every ~10 min (`merge --ff-only`, skips on local conflicts), then syncs
+  `/usr/local/bin` + unit files and restarts only the changed services. Runs from `/usr/local/bin`
+  (self-updates). Install once (see README); once on, merged changes deploy without a manual `git pull`.
 
 ## Runtime data contract (JSON in /run, world-readable — NOT secret)
 - `/run/fr24-watchdog/status.json` — written by watchdog each run (root; chmod 644 so pixoo/arin reads):

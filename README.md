@@ -61,6 +61,24 @@ sudo systemctl start fr24-watchdog
 ```
 (unit files ใน `systemd/` ก็เหมือนกัน — แก้แล้วต้อง `cp` เข้า `/etc/systemd/system/` + `daemon-reload`.)
 
+## Auto-update (ให้ Pi ดึง origin/main เอง — ติดตั้งครั้งเดียว)
+
+หลังจากนี้ merge เข้า `main` แล้ว Pi จะ pull + sync + restart เองทุก ~10 นาที ไม่ต้องสั่ง.
+
+```bash
+sudo cp ~/adsb-station/deploy/adsb-autoupdate.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/adsb-autoupdate.sh
+sudo cp ~/adsb-station/systemd/adsb-autoupdate.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now adsb-autoupdate.timer
+```
+
+- ดึง `origin/main` แบบ `merge --ff-only` (ปลอดภัย — ถ้า repo มี local edit ที่ชนกัน จะ**ข้าม**ไม่ทับ แล้ว log เตือน).
+- sync `watchdog` → `/usr/local/bin`, unit files → `/etc/systemd/system` (+ `daemon-reload`) ให้เอง.
+- restart เฉพาะ service ที่ไฟล์เปลี่ยนจริง (`flight-watcher` / `pixoo` / `fr24-watchdog`).
+- ดู log: `journalctl -u adsb-autoupdate -f` · หยุดชั่วคราว: `sudo systemctl disable --now adsb-autoupdate.timer`
+- สคริปต์ self-update ตัวเองด้วย (แก้ `deploy/adsb-autoupdate.sh` แล้ว merge → รอบถัดไปใช้ตัวใหม่).
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash
