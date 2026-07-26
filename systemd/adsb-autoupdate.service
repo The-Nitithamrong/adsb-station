@@ -1,0 +1,8 @@
+[Unit]
+Description=adsb-station auto-update (git pull origin/main + sync + restart changed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/adsb-autoupdate.sh
