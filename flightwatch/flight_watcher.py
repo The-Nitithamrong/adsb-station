@@ -13,6 +13,9 @@ HOST, PORT = "127.0.0.1", 30003
 DEST_LAT, DEST_LON = 13.6900, 100.7501   # VTBS สุวรรณภูมิ (เปลี่ยนเป็นพิกัด OPC จริงได้)
 WATCH_PREFIX = "THA"                      # การบินไทย (ไม่ปน AIQ/NOK/BKP)
 ETA_ALERT_MIN = 30                        # ยิงเมื่อ ETA <= นาที
+ETA_DESCENT_FPM = 750                     # ft/min เฉลี่ยขณะ descend — ใช้ทำ ETA จากความสูง
+#   anchor จริง (STAR EASTE 1C RNAV เข้า VTBS): ผ่าน STAR ~16000-18000 ft → เหลือ ~20-25 นาทีถึงพื้น
+#   16000/750=21m, 18000/750=24m ✓  (dist/gs เชื่อไม่ได้: STAR ไม่บินตรง + gs ลดตอน descend)
 MAX_RANGE_NM  = 250
 CLEAR_SEC     = 300                       # ไม่เห็นเกินนี้ = ลบ state (ให้ arrival รอบใหม่ยิงได้อีก)
 ENV_FILE      = "/etc/fr24-watchdog.env"  # reuse TG_API / TG_CHAT ตัวเดิม
@@ -87,9 +90,14 @@ def is_inbound(p):
     return closing and (descending or low)
 
 def eta_min(p):
-    if not p.get("gs") or p["gs"] <= 0 or p.get("dist") is None:
-        return None
-    return p["dist"] / p["gs"] * 60.0
+    """ETA จากความสูง (ดีกว่าเส้นตรงสำหรับ STAR arrival): เหลือ ~ alt / descent_rate นาที.
+    ถ้าไม่มี alt ค่อย fallback เป็นเส้นตรง dist/gs (เชื่อได้น้อย)."""
+    a = p.get("alt")
+    if a is not None and a > 0:
+        return a / ETA_DESCENT_FPM
+    if p.get("gs") and p["gs"] > 0 and p.get("dist") is not None:
+        return p["dist"] / p["gs"] * 60.0
+    return None
 
 def parse(line):
     f = line.split(",")
