@@ -14,6 +14,7 @@ STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี�
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 REFRESH    = 10               # วินาที/เฟรม (โชว์แค่ HH:MM ไม่ต้องถี่)
 PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ตอนมีหน้าเดียวไม่มีผล)
+ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
 
 
 def read_status():
@@ -58,6 +59,8 @@ def main():
         R.draw_status_frame(d, data.get("health", "stale"))
         page(d, data)
 
+        if ROTATE:
+            img = img.rotate(ROTATE)     # จอติดกลับหัว → หมุนเฟรมชดเชย
         pixoo.draw_image(img)     # ปรับตาม API lib ของคุณถ้าต่าง (บางรุ่น draw_image_at_location)
         pixoo.push()
 
