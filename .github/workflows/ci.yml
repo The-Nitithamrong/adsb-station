@@ -28,6 +28,16 @@ jobs:
             bash -n "$f"
           done
 
+      - name: Lint Python (ruff)
+        uses: astral-sh/ruff-action@v3
+
+      - name: Lint shell scripts (shellcheck)
+        run: |
+          for f in $(git ls-files '*.sh'); do
+            echo "== $f"
+            shellcheck "$f"
+          done
+
       - name: Validate systemd unit files
         run: |
           fail=0

@@ -1,0 +1,13 @@
+# Edge scripts are intentionally compact (multiple statements per line, grouped
+# imports). Lint for real bugs — undefined names, unused imports, bad f-strings —
+# not for that deliberate style.
+target-version = "py311"
+
+[lint]
+# E9  = syntax errors
+# F   = pyflakes (undefined names, unused imports, f-string mistakes)
+# B   = flake8-bugbear (likely bugs: mutable defaults, etc.)
+select = ["E9", "F", "B"]
+# Style rules we deliberately violate in edge scripts:
+# E401 grouped imports, E701 one-line if/try — keep them.
+ignore = ["E401", "E701"]

@@ -6,7 +6,7 @@ dedupe 1 ครั้ง/เที่ยว, ยิง Telegram + บันท�
 รัน: python3 flight_watcher.py   (Ctrl+C ออก)
 walk-before-run: ทดสอบบนสถานีบ้านก่อน แล้วย้าย reference ไป OPC ทีหลัง
 """
-import socket, time, math, sqlite3, urllib.request, urllib.parse, sys
+import socket, time, math, sqlite3, urllib.request, urllib.parse
 
 # ---------- config ----------
 HOST, PORT = "127.0.0.1", 30003
