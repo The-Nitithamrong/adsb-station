@@ -18,6 +18,15 @@ ETA_DESCENT_FPM = 750                     # ft/min เฉลี่ยขณะ d
 #   16000/750=21m, 18000/750=24m ✓  (dist/gs เชื่อไม่ได้: STAR ไม่บินตรง + gs ลดตอน descend)
 MAX_RANGE_NM  = 250
 CLEAR_SEC     = 300                       # ไม่เห็นเกินนี้ = ลบ state (ให้ arrival รอบใหม่ยิงได้อีก)
+# จุดเข้า STAR ของ VTBS (ทุกจุด FL180) — จากชาร์ต RNAV. ใช้ tag ว่าเครื่องเข้า arrival ทางไหน + กี่โมง
+STAR_FIXES = {
+    "WILLA": (14.405, 100.060),   # NW  N14 24.3 E100 03.6
+    "NORTA": (14.718, 100.638),   # N   N14 43.1 E100 38.3
+    "EASTE": (14.310, 101.287),   # NE  N14 18.6 E101 17.2
+    "TUMGA": (13.355, 101.202),   # SE  N13 21.3 E101 12.1
+    "LEBIM": (13.087, 100.473),   # SW  N13 05.2 E100 28.4
+}
+STAR_FIX_RADIUS_NM = 5                     # ผ่านใกล้ fix ในรัศมีนี้ = ถือว่าเข้า STAR ที่ gate นั้น
 ENV_FILE      = "/etc/fr24-watchdog.env"  # reuse TG_API / TG_CHAT ตัวเดิม
 DB_FILE       = "/home/arin/flightwatch.db"
 INBOUND_FILE  = "/run/flight-watcher/inbound.json"  # Pixoo THA-inbound page อ่านไฟล์นี้ (RuntimeDirectory)
@@ -66,7 +75,14 @@ db.execute("""CREATE TABLE IF NOT EXISTS tracks(
     first_ts INTEGER, last_ts INTEGER, samples INTEGER,
     min_dist_nm REAL, alt_at_min INTEGER, min_alt INTEGER,
     last_dist_nm REAL, last_alt INTEGER, max_dist_nm REAL,
-    alert_ts INTEGER, alert_eta REAL)""")
+    alert_ts INTEGER, alert_eta REAL,
+    star_fix TEXT, star_alt INTEGER, star_ts INTEGER)""")
+# migrate DB เก่าที่ยังไม่มีคอลัมน์ star_* (idempotent)
+for _col, _typ in (("star_fix", "TEXT"), ("star_alt", "INTEGER"), ("star_ts", "INTEGER")):
+    try:
+        db.execute(f"ALTER TABLE tracks ADD COLUMN {_col} {_typ}")
+    except sqlite3.OperationalError:
+        pass
 db.commit()
 
 # ---------- helpers ----------
@@ -111,7 +127,8 @@ def parse(line):
                                    "dist_hist": [], "alt_hist": [], "notified": False,
                                    "first_ts": None, "samples": 0, "min_dist": None,
                                    "alt_at_min": None, "min_alt": None, "max_dist": None,
-                                   "alert_ts": None, "alert_eta": None})
+                                   "alert_ts": None, "alert_eta": None,
+                                   "star_fix": None, "star_alt": None, "star_ts": None})
     for k, i in FIELDS.items():
         v = f[i].strip()
         if not v:
@@ -133,7 +150,20 @@ def parse(line):
         if p["alt"] is not None:
             p["alt_hist"] = (p["alt_hist"] + [p["alt"]])[-6:]
         accumulate(p)
+        detect_star(p)
         check(hexid, p)
+
+def detect_star(p):
+    """ผ่านใกล้จุดเข้า STAR จุดไหน (จุดแรก) = tag arrival gate + เวลา + alt ตอนนั้น"""
+    if p["star_fix"] is not None or p.get("lat") is None or p.get("lon") is None:
+        return
+    for name, (la, lo) in STAR_FIXES.items():
+        if haversine_nm(p["lat"], p["lon"], la, lo) <= STAR_FIX_RADIUS_NM:
+            p["star_fix"] = name
+            p["star_ts"] = int(p["ts"])
+            p["star_alt"] = p.get("alt")
+            print(f"  STAR entry {p['callsign'].strip() or '?':8} via {name}  FL{(p.get('alt') or 0)//100:03d}")
+            return
 
 def accumulate(p):
     """สะสมสถิติ track: ระยะใกล้สุด + alt ที่จุดนั้น, alt ต่ำสุด, ระยะไกลสุด, จำนวน fix"""
@@ -184,14 +214,19 @@ def record_track(hexid, p):
     if p["min_dist"] > TRACK_NEAR_NM:      # ไม่เคยเข้าใกล้ VTBS → ไม่เก็บ (overflight ไกล)
         return
     cs = p.get("callsign", "").strip()
-    db.execute("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-        hexid, cs, 1 if cs.startswith(WATCH_PREFIX) else 0,
-        int(p["first_ts"]) if p.get("first_ts") else None,
-        int(p.get("ts", time.time())), p["samples"],
-        round(p["min_dist"], 1), p.get("alt_at_min"), p.get("min_alt"),
-        round(p["dist"], 1) if p.get("dist") is not None else None, p.get("alt"),
-        round(p["max_dist"], 1) if p.get("max_dist") is not None else None,
-        p.get("alert_ts"), p.get("alert_eta")))
+    db.execute(
+        "INSERT INTO tracks (hex,flight,watched,first_ts,last_ts,samples,"
+        "min_dist_nm,alt_at_min,min_alt,last_dist_nm,last_alt,max_dist_nm,"
+        "alert_ts,alert_eta,star_fix,star_alt,star_ts) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+            hexid, cs, 1 if cs.startswith(WATCH_PREFIX) else 0,
+            int(p["first_ts"]) if p.get("first_ts") else None,
+            int(p.get("ts", time.time())), p["samples"],
+            round(p["min_dist"], 1), p.get("alt_at_min"), p.get("min_alt"),
+            round(p["dist"], 1) if p.get("dist") is not None else None, p.get("alt"),
+            round(p["max_dist"], 1) if p.get("max_dist") is not None else None,
+            p.get("alert_ts"), p.get("alert_eta"),
+            p.get("star_fix"), p.get("star_alt"), p.get("star_ts")))
     db.commit()
 
 def prune():
