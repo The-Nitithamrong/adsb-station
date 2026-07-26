@@ -63,9 +63,11 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 ## Roadmap (prioritized)
 1. Validate THA detection from home, then run flight_watcher as the provided systemd service.
 2. Tune inbound filter + ETA vs real THA arrivals; set DEST_LAT/LON to exact OPC coords when known.
-   NOTE: straight-line ETA (dist/gs) is unreliable — STAR arrivals don't fly straight in and gs drops
-   during descent. `tracks` table + `track_stats.py` collect ground truth to calibrate. Also: signal
-   is not continuous to the ground (coverage floor) — `alt_at_min` shows the lowest we still receive.
+   ETA is now ALTITUDE-based: `alt / ETA_DESCENT_FPM` (750 ft/min avg descent), NOT straight-line
+   dist/gs (unreliable — STAR arrivals don't fly straight in and gs drops during descent).
+   Anchor from real ops + EASTE 1C RNAV chart: crossing the STAR at ~16000–18000 ft → ~20–25 min to
+   touchdown (16000/750≈21m, 18000/750≈24m). `tracks` + `track_stats.py` collect ground truth to
+   re-tune ETA_DESCENT_FPM. Signal isn't continuous to the ground — `alt_at_min` = lowest we still receive.
 3. Add LINE OA notify alongside Telegram.
 4. Add SQLite → Dataverse outbox forwarder (survive connectivity gaps).
 5. ✅ DONE — watchdog writes status.json; feeder page reads it; THA-inbound page added
