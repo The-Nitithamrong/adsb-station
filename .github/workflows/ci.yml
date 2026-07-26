@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    name: Syntax check (Python + shell)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Edge scripts are stdlib-only by design — no pip install needed.
+      - name: Compile all Python (catch syntax errors)
+        run: python -m py_compile $(git ls-files '*.py')
+
+      - name: Check shell scripts (bash -n)
+        run: |
+          for f in $(git ls-files '*.sh'); do
+            echo "== $f"
+            bash -n "$f"
+          done
+
+      - name: Lint Python (ruff)
+        uses: astral-sh/ruff-action@v3
+
+      - name: Lint shell scripts (shellcheck)
+        run: |
+          for f in $(git ls-files '*.sh'); do
+            echo "== $f"
+            shellcheck "$f"
+          done
+
+      - name: Validate systemd unit files
+        run: |
+          fail=0
+          for f in $(git ls-files 'systemd/*'); do
+            echo "== $f"
+            # Every unit must declare a [Unit]/[Service]/[Timer] section header.
+            grep -qE '^\[(Unit|Service|Timer|Install)\]' "$f" || { echo "  no section header"; fail=1; }
+          done
+          exit $fail

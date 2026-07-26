@@ -21,6 +21,7 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 
 # ---- config (override ได้ใน /etc/fr24-watchdog.env) ----
+# shellcheck source=/dev/null  # runtime secrets file, not in repo (TG_API/TG_CHAT/HC_URL)
 [ -f /etc/fr24-watchdog.env ] && . /etc/fr24-watchdog.env
 
 SBS_HOST="${SBS_HOST:-127.0.0.1}"
