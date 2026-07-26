@@ -26,7 +26,9 @@ STAR_FIXES = {
     "TUMGA": (13.355, 101.202),   # SE  N13 21.3 E101 12.1
     "LEBIM": (13.087, 100.473),   # SW  N13 05.2 E100 28.4
 }
-STAR_FIX_RADIUS_NM = 5                     # ผ่านใกล้ fix ในรัศมีนี้ = ถือว่าเข้า STAR ที่ gate นั้น
+STAR_FIX_RADIUS_NM = 8                     # ผ่านใกล้ fix ในรัศมีนี้ = ถือว่าเข้า STAR ที่ gate นั้น
+#   หมายเหตุ: gate ไกล (EASTE 48nm / WILLA-NORTA 59-62nm) อยู่ FL180 ซึ่ง "ต่ำกว่า" radio horizon
+#   ที่ระยะนั้น (จากข้อมูลจริง floor 40-60nm ~21000ft) → มักจับไม่ได้ที่ตัว gate. TUMGA(33)/LEBIM(40) มีโอกาสกว่า
 ENV_FILE      = "/etc/fr24-watchdog.env"  # reuse TG_API / TG_CHAT ตัวเดิม
 DB_FILE       = "/home/arin/flightwatch.db"
 INBOUND_FILE  = "/run/flight-watcher/inbound.json"  # Pixoo THA-inbound page อ่านไฟล์นี้ (RuntimeDirectory)
