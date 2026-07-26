@@ -1,0 +1,10 @@
+[Unit]
+Description=Run adsb-station outbox forwarder every 10 min
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

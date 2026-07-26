@@ -79,6 +79,43 @@ sudo systemctl enable --now adsb-autoupdate.timer
 - ดู log: `journalctl -u adsb-autoupdate -f` · หยุดชั่วคราว: `sudo systemctl disable --now adsb-autoupdate.timer`
 - สคริปต์ self-update ตัวเองด้วย (แก้ `deploy/adsb-autoupdate.sh` แล้ว merge → รอบถัดไปใช้ตัวใหม่).
 
+## Outbox → Cloudflare D1 (optional — ส่ง events+tracks ขึ้น cloud, ทนเน็ตหลุด)
+
+`flightwatch/outbox.py` ส่งแถวใหม่ของ `events` + `tracks` ขึ้น D1 ทุก ~10 นาที (systemd timer),
+mark `sent` ต่อแถว → เน็ตหลุดก็คิวไว้ retry, ส่งซ้ำไม่ dup (uid = PK + `INSERT OR IGNORE`).
+pluggable — เพิ่ม sink อื่น (เช่น Dataverse) ทีหลังได้.
+
+**1. สร้าง D1 database + ตาราง** (Cloudflare dashboard หรือ `wrangler`):
+```sql
+CREATE TABLE IF NOT EXISTS events (
+  uid TEXT PRIMARY KEY, station TEXT,
+  ts INTEGER, flight TEXT, hex TEXT, eta_min REAL, dist_nm REAL, gs INTEGER, alt INTEGER);
+CREATE TABLE IF NOT EXISTS tracks (
+  uid TEXT PRIMARY KEY, station TEXT,
+  hex TEXT, flight TEXT, watched INTEGER, first_ts INTEGER, last_ts INTEGER, samples INTEGER,
+  min_dist_nm REAL, alt_at_min INTEGER, min_alt INTEGER, last_dist_nm REAL, last_alt INTEGER,
+  max_dist_nm REAL, alert_ts INTEGER, alert_eta REAL, star_fix TEXT, star_alt INTEGER, star_ts INTEGER);
+```
+
+**2. API token**: Cloudflare → My Profile → API Tokens → สิทธิ์ `Account : D1 : Edit`.
+
+**3. เพิ่มลง `/etc/fr24-watchdog.env`** (ไม่ขึ้น repo):
+```bash
+D1_ACCOUNT_ID="..."      # Cloudflare account id
+D1_DATABASE_ID="..."     # จาก wrangler d1 create / dashboard
+D1_API_TOKEN="..."       # token ข้อ 2
+STATION_ID="T-VTBD178"   # optional (default = hostname) — แยกสถานีตอนมีหลายตัว (OPC ในอนาคต)
+```
+
+**4. ติดตั้ง service + timer**:
+```bash
+sudo cp ~/adsb-station/systemd/adsb-outbox.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now adsb-outbox.timer
+sudo systemctl start adsb-outbox     # ส่งรอบแรกเลย · ดู log: journalctl -u adsb-outbox
+```
+(อยู่ในโฟลเดอร์ `systemd/` → auto-update จัดการ restart timer ให้เองเมื่อแก้ในอนาคต)
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash
