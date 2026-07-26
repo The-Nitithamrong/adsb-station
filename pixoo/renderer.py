@@ -22,7 +22,7 @@ HEALTH = {
     "dead":       (220, 70, 64),    # แดง
     "stale":      (150, 150, 160),  # เทา (ไม่มีข้อมูล)
 }
-HEALTH_WORD = {"ok": "live", "recovering": "recover", "dead": "DOWN", "stale": "?"}
+HEALTH_WORD = {"ok": "live", "recovering": "rcvr", "dead": "DOWN", "stale": "--"}  # สั้น ≤4 ตัว กันชนแถวล่าง
 
 # ---- fonts: Pixel Operator (วางไฟล์ .ttf ไว้ข้างๆ script) ----
 # ดาวน์โหลดฟรี: https://www.dafont.com/pixel-operator.font  (OFL)
@@ -51,9 +51,9 @@ def text(d, xy, s, font, color, anchor="la"):
 
 
 def draw_header(d, now):
-    """โซน fix: เวลา (cyan) + วันที่ (gold)"""
-    text(d, (32, 1),  now.strftime("%H:%M"),      "big",   PALETTE["time"], anchor="ma")
-    text(d, (32, 17), now.strftime("%a %d %b"),   "small", PALETTE["date"], anchor="ma")
+    """โซน fix: เวลา (cyan) + วันที่ (gold). ขยับขึ้นให้ date พ้นเส้น divider"""
+    text(d, (32, 0),  now.strftime("%H:%M"),      "big",   PALETTE["time"], anchor="ma")
+    text(d, (32, 16), now.strftime("%a %d %b"),   "small", PALETTE["date"], anchor="ma")
     d.line([(3, 25), (60, 25)], fill=PALETTE["divider"])
 
 
