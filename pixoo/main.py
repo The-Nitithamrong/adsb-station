@@ -9,7 +9,9 @@ from pages import PAGES
 
 PIXOO_IP   = "192.168.41.143"
 STATUS_F   = "/run/fr24-watchdog/status.json"
+THA_F      = "/run/flight-watcher/inbound.json"   # THA inbound (เขียนโดย flight_watcher.py)
 STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี้ = ถือว่า stale
+THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 REFRESH    = 10               # วินาที/เฟรม (โชว์แค่ HH:MM ไม่ต้องถี่)
 PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ตอนมีหน้าเดียวไม่มีผล)
 
@@ -28,11 +30,24 @@ def read_status():
         return {"health": "stale", "msg_per_s": 0, "aircraft": 0}
 
 
+def read_inbound():
+    # THA inbound ล่าสุด (flight=None หรือ stale = ไม่มี → page โชว์ "no inbound")
+    try:
+        with open(THA_F) as f:
+            d = json.load(f)
+        if not d.get("flight") or time.time() - d.get("ts", 0) > THA_STALE_SEC:
+            return None
+        return d
+    except Exception:
+        return None
+
+
 def main():
     pixoo = Pixoo(PIXOO_IP)
     tick = 0
     while True:
         data = read_status()
+        data["tha"] = read_inbound()
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()

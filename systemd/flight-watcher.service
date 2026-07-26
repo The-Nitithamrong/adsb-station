@@ -10,6 +10,7 @@ WorkingDirectory=/home/arin/adsb-station/flightwatch
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/flightwatch/flight_watcher.py
 Restart=always
 RestartSec=10
+RuntimeDirectory=flight-watcher    # สร้าง /run/flight-watcher (owned by arin) → เขียน inbound.json ให้ Pixoo
 
 [Install]
 WantedBy=multi-user.target

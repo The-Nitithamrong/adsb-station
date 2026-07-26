@@ -39,6 +39,7 @@ HARDALERT_COOLDOWN="${HARDALERT_COOLDOWN:-3600}"
 
 STATE_DIR=/run/fr24-watchdog
 mkdir -p "$STATE_DIR"
+chmod 755 "$STATE_DIR" 2>/dev/null || true   # dir traversable → pixoo (user arin) อ่าน status.json ได้ (watchdog รัน root+umask077)
 FAILS_F="$STATE_DIR/fails"
 LASTHARD_F="$STATE_DIR/last_hardalert"
 STATUS_F="$STATE_DIR/status.json"    # อ่านโดย pixoo/main.py (feeder page)
@@ -83,6 +84,7 @@ write_status() {  # $1 = health (ok|recovering|dead) — atomic write ให้ 
     printf '{"ts":%s,"health":"%s","msg_per_s":%s,"aircraft":%s}\n' \
         "$(date +%s)" "$1" "$rate" "${LAST_AIRCRAFT:-0}" \
         > "$STATUS_F.tmp" && mv -f "$STATUS_F.tmp" "$STATUS_F"
+    chmod 644 "$STATUS_F" 2>/dev/null || true   # world-readable (ไม่ใช่ความลับ) → pixoo อ่านได้
 }
 
 is_healthy() {
