@@ -15,7 +15,7 @@ import sqlite3, sys, statistics
 DB = "/home/arin/flightwatch.db"
 COLS = ["hex", "flight", "watched", "first_ts", "last_ts", "samples",
         "min_dist", "alt_at_min", "min_alt", "last_dist", "last_alt",
-        "max_dist", "alert_ts", "alert_eta"]
+        "max_dist", "alert_ts", "alert_eta", "star_fix", "star_alt", "star_ts"]
 
 
 def main():
@@ -25,7 +25,8 @@ def main():
         rows = db.execute(
             "SELECT hex, flight, watched, first_ts, last_ts, samples, "
             "min_dist_nm, alt_at_min, min_alt, last_dist_nm, last_alt, "
-            "max_dist_nm, alert_ts, alert_eta FROM tracks").fetchall()
+            "max_dist_nm, alert_ts, alert_eta, star_fix, star_alt, star_ts "
+            "FROM tracks").fetchall()
     except sqlite3.OperationalError:
         print("ยังไม่มีตาราง tracks — flight_watcher เวอร์ชันใหม่ยังไม่ได้รัน/บันทึก")
         return
@@ -56,7 +57,25 @@ def main():
         low = min(havealt, key=lambda d: d["alt_at_min"])
         print(f"alt ต่ำสุดที่เคยรับใกล้สนาม: {low['alt_at_min']} ft @ {low['min_dist']} nm ({low['flight'] or low['hex']})")
 
-    # 2) ETA จริง vs คำนวณ (เฉพาะเที่ยวที่ alert แล้ว)
+    # 2) STAR gate — เวลาจริงจากจุดเข้า STAR ถึงสัญญาณหลุด (anchor ต่อ gate)
+    gated = [d for d in data if d["star_ts"] and d["last_ts"] and d["last_ts"] > d["star_ts"]]
+    print("\n=== STAR gate → สัญญาณหลุด: เวลาจริง (นาที) + alt ตอนผ่าน gate ===")
+    if gated:
+        print(f"{'gate':>6} | {'n':>3} | {'เวลา median':>11} | {'ช่วง':>9} | {'alt@gate med':>12}")
+        by_gate = {}
+        for d in gated:
+            by_gate.setdefault(d["star_fix"], []).append(d)
+        for gate, ds in sorted(by_gate.items(), key=lambda kv: -len(kv[1])):
+            mins = sorted((d["last_ts"] - d["star_ts"]) / 60.0 for d in ds)
+            alts = [d["star_alt"] for d in ds if d["star_alt"] is not None]
+            amed = f"{int(statistics.median(alts))} ft" if alts else "-"
+            print(f"{gate:>6} | {len(ds):>3} | {statistics.median(mins):>9.1f}m | "
+                  f"{mins[0]:>3.0f}-{mins[-1]:<3.0f}m | {amed:>12}")
+        print("หมายเหตุ: เวลานี้ยังไม่รวม final หลังสัญญาณหลุด — เอาไว้เทียบ/จูน ETA_DESCENT_FPM ต่อ gate")
+    else:
+        print("(ยังไม่มีเที่ยวที่จับจุดเข้า STAR ได้ — รอเครื่องผ่านใกล้ WILLA/NORTA/EASTE/TUMGA/LEBIM)")
+
+    # 3) ETA จริง vs คำนวณ (เฉพาะเที่ยวที่ alert แล้ว)
     alerted = [d for d in data if d["alert_ts"] and d["alert_eta"] and d["last_ts"]]
     print("\n=== เวลาจริง (alert → สัญญาณหลุด) vs ETA เส้นตรง ===")
     if not alerted:

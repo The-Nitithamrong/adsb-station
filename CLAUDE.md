@@ -36,8 +36,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `flightwatch/flight_watcher.py` — 30003 → THA inbound VTBS → ETA≤30m → dedupe → Telegram + SQLite.
   Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page,
   and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
-- `flightwatch/track_stats.py` — reads `tracks`: coverage floor (how low we still receive near VTBS)
-  + actual time (alert→signal-loss) vs the straight-line ETA. `python3 track_stats.py [THA]`.
+- `flightwatch/track_stats.py` — reads `tracks`: coverage floor (how low we still receive near VTBS),
+  actual STAR-gate→signal-loss time per gate, and actual vs computed ETA. `python3 track_stats.py [THA]`.
+  STAR entry gates (all FL180, coords from the RNAV chart) are in `STAR_FIXES`:
+  WILLA/NORTA/EASTE/TUMGA/LEBIM; a flight passing within `STAR_FIX_RADIUS_NM` is tagged with its gate.
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
