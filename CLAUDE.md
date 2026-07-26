@@ -49,6 +49,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 ## Conventions / guardrails
 - SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL). NEVER commit .env or *.db.
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
+  - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
+    `git pull` does NOT update those. After changing them, `cp` into place + restart / `daemon-reload`.
+    (`flight_watcher.py` and `pixoo/*.py` run from the repo, so pull is enough for those.)
+  - systemd directives take NO trailing `#` comment (whole line after `=` is the value) — comment on its own line.
 - Edge scripts: prefer Python stdlib only (no pip deps) so they run anywhere.
 - Future OPC/off-grid station: LTE modem must NOT be on USB (uhubctl L2 would power-cycle it) —
   use a 4G router over Ethernet, or a UART/HAT. Manage rooftop enclosure heat.

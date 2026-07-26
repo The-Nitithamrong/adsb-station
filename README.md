@@ -50,8 +50,16 @@ sudo systemctl enable --now pixoo
 
 ```bash
 cd ~/adsb-station && git pull
-sudo systemctl restart flight-watcher   # (หรือ service ที่แก้)
+sudo systemctl restart flight-watcher   # (หรือ service ที่แก้; pixoo รันจาก repo โดยตรง)
 ```
+
+⚠️ **watchdog รันจาก `/usr/local/bin/` ไม่ใช่ repo** — `git pull` ไม่อัปเดตให้.
+ถ้าแก้ `fr24-watchdog.sh` ต้อง copy ทับ + รันรอบใหม่:
+```bash
+sudo cp ~/adsb-station/watchdog/fr24-watchdog.sh /usr/local/bin/fr24-watchdog.sh
+sudo systemctl start fr24-watchdog
+```
+(unit files ใน `systemd/` ก็เหมือนกัน — แก้แล้วต้อง `cp` เข้า `/etc/systemd/system/` + `daemon-reload`.)
 
 ## ทดสอบก่อนรันเป็น service
 
