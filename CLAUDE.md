@@ -120,3 +120,12 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
    (flight_watcher writes inbound.json). Remaining polish: tune THA page thresholds vs real arrivals.
 6. Off-grid OPC station: solar+battery, 4G router, self power-monitoring, hardware watchdog,
    safe low-battery shutdown.
+   - ✅ hardware watchdog — `deploy/enable-hw-watchdog.sh` (systemd `RuntimeWatchdogSec` → bcm watchdog).
+     KEY INSIGHT: `fr24-watchdog` is a SOFTWARE watchdog on the same Pi — a full Pi hang (kernel lockup /
+     SD I/O stall) kills it too, so it can't recover the dongle. A dongle that looks "dead" (warm + no
+     data) may actually be the whole Pi hung, NOT the dongle — the original "21-hour silent failure" could
+     have been this. Hardware watchdog resets the Pi on kernel/systemd hang; software watchdog can't.
+   - Observed: spontaneous full hang ~04:00 correlating with `cron.daily` (man-db/apt I/O spike on SD) —
+     with an official 27W PSU (undervoltage ruled out), suspect SD I/O stall. journald was NOT persistent
+     (lost the crash logs) — re-enabled via `/var/log/journal`. `Power/throttle` sensor + persistent
+     journal now capture undervoltage/thermal for the next event.
