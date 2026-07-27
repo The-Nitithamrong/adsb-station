@@ -73,6 +73,49 @@ def flights_list(d, data):
         R.text(d, (48, y), f"{fl.get('fl', 0):03d}", "tiny", R.PALETTE["label"], anchor="la")
 
 
+def _countdown(mins):
+    """นาที → ข้อความนับถอยหลังสั้น: 'NOW' / 'IN 45M' / 'IN 22H' / 'IN 3D'"""
+    if mins is None:
+        return ""
+    if mins <= 0:
+        return "NOW"
+    if mins < 60:
+        return f"IN {mins}M"
+    if mins < 1440:
+        return f"IN {mins // 60}H"
+    return f"IN {mins // 1440}D"
+
+
+def next_flight(d, data):
+    """หน้า NEXT — งาน/เที่ยวบินถัดไปจาก Google Calendar (agenda_fetch.py → /run/agenda/next.json)
+    data["agenda"] = {summary, code, route, start_str, in_min, ...} หรือ None"""
+    ag = data.get("agenda")
+
+    R.text(d, (4, 28), "NEXT", "small", R.PALETTE["title"], anchor="la")
+
+    if not ag:   # ไม่มีนัด → ไอคอนเทา + ข้อความ
+        R.draw_plane(d, 6, 42, R.PALETTE["label"])
+        R.text(d, (17, 42), "no flt", "small", R.PALETTE["label"], anchor="la")
+        return
+
+    # แถวบนขวา: วันเริ่ม (เช่น 28/07) — gold
+    start = ag.get("start_str") or ""
+    day = start.split(" ")[0] if start else ""
+    if day:
+        R.text(d, (60, 28), day, "small", R.PALETTE["date"], anchor="ra")
+
+    # hero: code เที่ยวบิน (เช่น TG632) — น้ำเงิน; ถ้าไม่มี code ใช้คำแรกของ summary
+    hero = ag.get("code") or (ag.get("summary") or "").split(" ")[0] or "?"
+    R.text(d, (32, 37), hero[:6], "big", R.PALETTE["aircraft"], anchor="ma")
+
+    # แถวล่าง (tiny): route (ซ้าย) · นับถอยหลัง (ขวา สีเหลืองถ้าใกล้ <=24h)
+    route = ag.get("route") or ""
+    R.text(d, (4, 55), route, "tiny", R.PALETTE["label"], anchor="la")
+    mins = ag.get("in_min")
+    ccol = R.HEALTH["recovering"] if (mins is not None and mins <= 1440) else R.PALETTE["label"]
+    R.text(d, (60, 55), _countdown(mins), "tiny", ccol, anchor="ra")
+
+
 def _fmt2(s):
     """uptime เป็น 2 หน่วยบนสุด เช่น '3D 14H' / '14H 22M' / '22M'"""
     d, r = divmod(int(s), 86400)
@@ -113,4 +156,4 @@ def uptime(d, data):
 
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
 # (tha_inbound / flights_list เก็บฟังก์ชันไว้ ใส่กลับใน list ได้ทุกเมื่อ)
-PAGES = [feeder_status, uptime]
+PAGES = [feeder_status, uptime, next_flight]

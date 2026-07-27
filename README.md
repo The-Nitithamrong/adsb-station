@@ -150,6 +150,30 @@ sudo systemctl start adsb-ha-mqtt         # ยิงรอบแรก · ด�
 ```
 (publisher รันจาก repo → auto-update ดูแลให้; unit อยู่ใน `systemd/` → timer restart อัตโนมัติ)
 
+## Next flight บน Pixoo (optional — เที่ยวบินถัดไปจาก Google Calendar)
+
+หน้า `NEXT` บน Pixoo โชว์เที่ยวบิน/นัดถัดไป (code + route + นับถอยหลัง) ดึงจาก Google Calendar.
+ใช้ **private iCal (ICS) URL** ของปฏิทิน (ไม่ต้อง OAuth, stdlib ล้วน) — `agenda_fetch.py` ดึง ICS
+ทุก ~15 นาที, หาอีเวนต์ถัดไป, เขียน `/run/agenda/next.json` ให้ `pixoo/main.py` อ่าน.
+
+**1. เอา secret ICS URL**: Google Calendar → ⚙ Settings → เลือกปฏิทิน → **Integrate calendar**
+→ คัดลอก **"Secret address in iCal format"** (ลงท้าย `/basic.ics`). ⚠️ ลับ — ใครมีลิงก์อ่านปฏิทินได้.
+
+**2. เพิ่มลง `/etc/fr24-watchdog.env`** (ไม่ขึ้น repo):
+```bash
+GCAL_ICS_URL="https://calendar.google.com/calendar/ical/<...>/basic.ics"
+```
+
+**3. ติดตั้ง service + timer**:
+```bash
+sudo cp ~/adsb-station/systemd/adsb-agenda.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now adsb-agenda.timer
+sudo systemctl start adsb-agenda      # ดึงรอบแรกเลย · ดู log: journalctl -u adsb-agenda
+```
+(รันจาก repo → auto-update ดูแลให้; unit อยู่ใน `systemd/` → timer restart อัตโนมัติ. หน้า `NEXT`
+โผล่ใน rotation ของ Pixoo เอง; ถ้าไม่มีนัดจะโชว์ "no flt". ทดสอบ: `python3 agenda/agenda_fetch.py`)
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash

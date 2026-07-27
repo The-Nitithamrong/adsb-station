@@ -10,8 +10,10 @@ from pages import PAGES
 PIXOO_IP   = "192.168.41.143"
 STATUS_F   = "/run/fr24-watchdog/status.json"
 THA_F      = "/run/flight-watcher/inbound.json"   # THA inbound (เขียนโดย flight_watcher.py)
+AGENDA_F   = "/run/agenda/next.json"               # เที่ยวบินถัดไป (เขียนโดย agenda_fetch.py)
 STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี้ = ถือว่า stale
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
+AGENDA_STALE_SEC = 6 * 3600   # agenda เก่ากว่านี้ (fetch ตายไปนาน) = ไม่โชว์
 REFRESH    = 10               # วินาที/เฟรม (โชว์แค่ HH:MM ไม่ต้องถี่)
 PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ตอนมีหน้าเดียวไม่มีผล)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
@@ -76,6 +78,21 @@ def read_inbound():
         return {}
 
 
+def read_agenda():
+    # next.json (เที่ยวบินถัดไป) — คืน dict พร้อม in_min ที่คำนวณสดจาก start_ts, หรือ None
+    try:
+        with open(AGENDA_F) as f:
+            a = json.load(f)
+        if time.time() - a.get("ts", 0) > AGENDA_STALE_SEC or not a.get("summary"):
+            return None
+        st = a.get("start_ts")
+        if st is not None:
+            a["in_min"] = int((st - time.time()) / 60)   # นับถอยหลังสด (ไม่ใช้ค่าเก่าตอน fetch)
+        return a
+    except Exception:
+        return None
+
+
 def main():
     pixoo = Pixoo(PIXOO_IP)
     tick = 0
@@ -91,6 +108,7 @@ def main():
         data["temp_c"] = read_temp()                       # อุณหภูมิ CPU
         data["svc_uptime_s"] = read_svc_uptime(UPTIME_SVC, up)
         data["svc_name"] = "FDR"
+        data["agenda"] = read_agenda()                     # เที่ยวบินถัดไป (Google Calendar)
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()
