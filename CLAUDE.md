@@ -67,6 +67,12 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   received count, THA flight/ETA/dist. Also SUBSCRIBES (reverse direction) to `adsb/<sid>/fan` (retained,
   published by an HA automation on the Tuya cooling-fan switch) via `mosquitto_sub -C 1 -W 2` and writes
   `/run/adsb-ha/fan.json` for the Pixoo UP-page fan icon (real switch state, ~1 min lag).
+  GOTCHA (HA automations): HA slugifies the discovery device name `ADS-B <host>` for entity_ids —
+  `-` → `_`, `/` → `_` — so entities are `sensor.ads_b_<host>_*` NOT `adsb_<host>_*`
+  (e.g. `sensor.ads_b_arin_cpu_temperature`, `sensor.ads_b_arin_power_throttle`). Wrong id →
+  numeric_state conditions silently stay False (fan never toggles). Always copy the real entity_id from
+  HA → Developer Tools → States; never guess. A robust fan automation also needs a `time_pattern`
+  re-check (numeric_state only fires on threshold *crossings* — a missed edge leaves the fan stuck).
 - `deploy/adsb-autoupdate.sh` (+ `systemd/adsb-autoupdate.{service,timer}`) — OPTIONAL: Pi auto-pulls
   `origin/main` every ~10 min (`merge --ff-only`, skips on local conflicts), then syncs
   `/usr/local/bin` + unit files and restarts only the changed services. Runs from `/usr/local/bin`

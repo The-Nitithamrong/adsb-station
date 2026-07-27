@@ -212,8 +212,15 @@ sudo systemctl daemon-reload && sudo systemctl start adsb-ha-mqtt
 cat /run/adsb-ha/fan.json      # {"ts": ..., "on": true/false}
 ```
 
-**3. Automation เปิด/ปิดพัดลมตามอุณหภูมิ** (ตัวที่สั่งปลั๊กจริง) — trigger จาก `sensor.adsb_<host>_cpu_temperature`,
-above 70 → `switch.turn_on`, below 60 → `switch.turn_off` (มี hysteresis กันกระพริบ).
+**3. Automation เปิด/ปิดพัดลมตามอุณหภูมิ** (ตัวที่สั่งปลั๊กจริง) — trigger จาก sensor CPU temp,
+above 50 → `switch.turn_on`, below 45 → `switch.turn_off` (hysteresis กันกระพริบ) + `time_pattern: /2`
+เช็คซ้ำทุก 2 นาที (numeric_state ยิงแค่ตอน "ข้าม" threshold — พลาด edge = พัดลมค้าง).
+
+> ⚠️ **GOTCHA ชื่อ entity ใน HA**: HA แปลงชื่อ device `ADS-B <host>` เป็น entity_id โดย `-`/`/` → `_`
+> → entity จริงคือ **`sensor.ads_b_<host>_*`** (เช่น `sensor.ads_b_arin_cpu_temperature`,
+> `sensor.ads_b_arin_power_throttle`) **ไม่ใช่** `adsb_...` ที่เดา. ถ้าใส่ชื่อผิด numeric_state condition
+> จะเป็น False เงียบๆ (พัดลมไม่ทำงานทั้ง on/off). **คัดลอกชื่อจริงจาก Developer Tools → States เสมอ**.
+> HA unit system ต้องเป็น **Metric** ด้วย ไม่งั้น temp เป็น °F แล้ว threshold เพี้ยน (Settings → System → General).
 
 ## ทดสอบก่อนรันเป็น service
 
