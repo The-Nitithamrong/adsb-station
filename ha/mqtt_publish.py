@@ -13,6 +13,7 @@ import json, socket, subprocess, sys
 ENV_FILE = "/etc/fr24-watchdog.env"
 STATUS_F = "/run/fr24-watchdog/status.json"
 INBOUND_F = "/run/flight-watcher/inbound.json"
+TEMP_F = "/sys/class/thermal/thermal_zone0/temp"   # CPU temp Pi (millidegree)
 DISC = "homeassistant"          # HA discovery prefix (default)
 EXPIRE = 300                    # sensor เป็น unavailable ถ้าไม่มี state ใหม่ใน 5 นาที (timer=1m)
 
@@ -44,6 +45,7 @@ SENSORS = [
     ("feeder_health",     "Feeder health",     "feeder",  "health",    None,    None,          "mdi:radar"),
     ("feeder_rate",       "Feeder rate",       "feeder",  "msg_per_s", "msg/s", "measurement", "mdi:speedometer"),
     ("feeder_aircraft",   "Aircraft (feeder)", "feeder",  "aircraft",  None,    "measurement", "mdi:airplane"),
+    ("cpu_temp",          "CPU temperature",   "feeder",  "cpu_temp",  "°C",    "measurement", "mdi:thermometer"),
     ("received_aircraft", "Aircraft received", "inbound", "nrx",       None,    "measurement", "mdi:airplane-search"),
     ("tha_flight",        "THA inbound",       "inbound", "flight",    None,    None,          "mdi:airplane-landing"),
     ("tha_eta",           "THA ETA",           "inbound", "eta_min",   "min",   "measurement", "mdi:timer"),
@@ -57,6 +59,15 @@ def read_json(path):
             return json.load(f)
     except (OSError, ValueError):
         return {}
+
+
+def read_temp():
+    # อุณหภูมิ CPU Pi (°C) — mqtt_publish รันบน Pi (User=arin) จึงอ่าน /sys ได้ตรง
+    try:
+        with open(TEMP_F) as f:
+            return round(int(f.read().strip()) / 1000.0, 1)
+    except (OSError, ValueError):
+        return None
 
 
 def pub(topic, payload, retain=True):
@@ -84,6 +95,8 @@ def publish_discovery():
         }
         if unit:
             cfg["unit_of_measurement"] = unit
+            if unit == "°C":
+                cfg["device_class"] = "temperature"   # HA แสดง/กราฟเป็นอุณหภูมิถูกต้อง
         if sclass:
             cfg["state_class"] = sclass
         pub(f"{DISC}/sensor/adsb_{SID}/{oid}/config", json.dumps(cfg), retain=True)
@@ -96,6 +109,7 @@ def publish_state():
         "health": feeder.get("health", "stale"),
         "msg_per_s": feeder.get("msg_per_s", 0),
         "aircraft": feeder.get("aircraft", 0),
+        "cpu_temp": read_temp(),
     }
     inbound_state = {
         "nrx": inb.get("nrx", 0),
