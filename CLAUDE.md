@@ -48,7 +48,14 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   re-send. Pluggable — add a sink `send(table,cols,rows)->count` to `SINKS` (e.g. Dataverse later).
   D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
-  page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `tha_inbound`.
+  page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `uptime`,
+  `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotated 180° (upside-down mount).
+- `agenda/agenda_fetch.py` (+ `systemd/adsb-agenda.{service,timer}`) — OPTIONAL: fetches the next Google
+  Calendar event (next flight) via the calendar's **private iCal (ICS) secret URL** over HTTPS (stdlib
+  urllib — NO OAuth, runs anywhere), parses the soonest upcoming VEVENT (skips RRULE/past), extracts
+  flight `code` + `route` from the summary, writes `/run/agenda/next.json` for the Pixoo `next_flight`
+  page. Runs via systemd timer every ~15 min. ICS URL (`GCAL_ICS_URL`) lives in /etc/fr24-watchdog.env.
+  Why ICS not the Calendar API: Pi reads local files only + ICS needs no OAuth/token refresh (stdlib-only).
 - `systemd/*` — unit files for each service.
 - `ha/mqtt_publish.py` (+ `systemd/adsb-ha-mqtt.{service,timer}`, `deploy/homeassistant/`) — OPTIONAL:
   publishes /run status+inbound to MQTT with Home Assistant discovery (retained config + state) every
@@ -65,9 +72,14 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `{ts, health: ok|recovering|dead, msg_per_s, aircraft}`. Pixoo derives `stale` from `ts` age.
 - `/run/flight-watcher/inbound.json` — written by flight_watcher (arin; via `RuntimeDirectory=flight-watcher`):
   `{ts, flight, eta_min, dist_nm, alt, gs, hex}` or `{ts, flight: null}` when no THA inbound.
+- `/run/agenda/next.json` — written by agenda_fetch (arin; via `RuntimeDirectory=agenda` +
+  `RuntimeDirectoryPreserve=yes` so the oneshot's dir survives between runs):
+  `{ts, summary, code, route, start_ts, start_str, in_min, all_day}` or `{ts, summary: null}` when no
+  upcoming event. Pixoo recomputes `in_min` live from `start_ts` each tick (fetched value can be stale).
 
 ## Conventions / guardrails
-- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*). NEVER commit .env or *.db.
+- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*, GCAL_ICS_URL). NEVER commit .env or *.db.
+  (GCAL_ICS_URL is a private calendar link — treat as secret; anyone with it reads your calendar.)
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
   - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
     `git pull` does NOT update those. After changing them, `cp` into place + restart / `daemon-reload`.

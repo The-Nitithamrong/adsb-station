@@ -1,0 +1,13 @@
+[Unit]
+Description=Fetch next Google Calendar agenda (ICS) -> /run/agenda/next.json for Pixoo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=arin
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/agenda/agenda_fetch.py
+# สร้าง /run/agenda (owned by arin) → เขียน next.json ให้ Pixoo
+# (ค่าต้องไม่มี comment ท้ายบรรทัด — systemd อ่านทั้งบรรทัดเป็นชื่อ dir)
+RuntimeDirectory=agenda
+RuntimeDirectoryPreserve=yes
