@@ -61,7 +61,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   publishes /run status+inbound to MQTT with Home Assistant discovery (retained config + state) every
   1 min via `mosquitto_pub` (apt mosquitto-clients; stdlib only). HA + Mosquitto run as Docker
   containers (`deploy/homeassistant/docker-compose.yml`). MQTT creds (`MQTT_HOST/PORT/USER/PASS`) in
-  /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, **CPU temp** (device_class temperature),
+  /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, **CPU temp** (unit °C, state_class
+  measurement — NO device_class temperature on purpose: device_class makes HA convert °C↔°F by unit
+  system, which can revert/override on HA config corruption and silently break the numeric_state fan
+  automation; raw °C = stable),
   **power/throttle** (`vcgencmd get_throttled` decoded: ok / undervoltage / throttled / freq-capped /
   soft-temp / "ok (… occurred)" sticky history — needs user in group `video`, else "unknown"),
   received count, THA flight/ETA/dist. Also SUBSCRIBES (reverse direction) to `adsb/<sid>/fan` (retained,

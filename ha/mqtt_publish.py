@@ -152,8 +152,10 @@ def publish_discovery():
         }
         if unit:
             cfg["unit_of_measurement"] = unit
-            if unit == "°C":
-                cfg["device_class"] = "temperature"   # HA แสดง/กราฟเป็นอุณหภูมิถูกต้อง
+            # หมายเหตุ: จงใจ "ไม่" ตั้ง device_class=temperature ให้ cpu_temp —
+            # device_class temperature ทำให้ HA แปลงหน่วยตาม unit system (°C↔°F) ซึ่ง
+            # เพี้ยน/revert ได้ (เช่นตอน HA config เสียหลัง crash) → automation คุมพัดลม
+            # (numeric_state) พังเงียบๆ. ปล่อยเป็นเลขดิบ °C เสมอ = automation เสถียร.
         if sclass:
             cfg["state_class"] = sclass
         pub(f"{DISC}/sensor/adsb_{SID}/{oid}/config", json.dumps(cfg), retain=True)
