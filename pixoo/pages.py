@@ -73,8 +73,20 @@ def flights_list(d, data):
         R.text(d, (48, y), f"{fl.get('fl', 0):03d}", "tiny", R.PALETTE["label"], anchor="la")
 
 
+def _fmt2(s):
+    """uptime เป็น 2 หน่วยบนสุด เช่น '3D 14H' / '14H 22M' / '22M'"""
+    d, r = divmod(int(s), 86400)
+    h, r = divmod(r, 3600)
+    m = r // 60
+    if d:
+        return f"{d}D {h}H"
+    if h:
+        return f"{h}H {m}M"
+    return f"{m}M"
+
+
 def uptime(d, data):
-    """หน้า UP — สถานีรันมานานเท่าไหร่ตั้งแต่ boot ล่าสุด + เวลา restart ล่าสุด"""
+    """หน้า UP — system uptime (hero) + service uptime (FDR) + อุณหภูมิ CPU + เวลา boot ล่าสุด"""
     up = data.get("uptime_s", 0)
     days, rem = divmod(up, 86400)
     hours, rem = divmod(rem, 3600)
@@ -82,13 +94,21 @@ def uptime(d, data):
 
     R.text(d, (4, 28), "UP", "small", R.PALETTE["title"], anchor="la")
 
-    # hero: หน่วยที่ใหญ่สุด (วัน/ชม./นาที) — cyan
-    hero = f"{days}D" if days else (f"{hours}H" if hours else f"{mins}M")
-    R.text(d, (32, 34), hero, "big", R.PALETTE["time"], anchor="ma")
+    # อุณหภูมิ CPU มุมขวาบน — สีตามความร้อน (<65 เขียว · <75 เหลือง · ร้อนกว่านั้น แดง)
+    t = data.get("temp_c")
+    if t is not None:
+        tcol = R.HEALTH["ok"] if t < 65 else (R.HEALTH["recovering"] if t < 75 else R.HEALTH["dead"])
+        R.text(d, (60, 28), f"{int(round(t))}C", "small", tcol, anchor="ra")
 
-    # แถวล่าง (tiny): breakdown เต็ม + เวลา boot ล่าสุด
-    R.text(d, (32, 52), f"{days}D {hours}H {mins}M", "tiny", R.PALETTE["label"], anchor="mm")
-    R.text(d, (32, 58), data.get("boot_str", "?"), "tiny", R.PALETTE["label"], anchor="mm")
+    # hero: system uptime หน่วยใหญ่สุด — cyan
+    hero = f"{days}D" if days else (f"{hours}H" if hours else f"{mins}M")
+    R.text(d, (32, 36), hero, "big", R.PALETTE["time"], anchor="ma")
+
+    # แถวล่าง (tiny): service uptime (FDR) + เวลา boot ล่าสุด
+    su = data.get("svc_uptime_s")
+    svc = f"{data.get('svc_name', 'SVC')} " + (_fmt2(su) if su is not None else "--")
+    R.text(d, (32, 53), svc, "tiny", R.PALETTE["label"], anchor="mm")
+    R.text(d, (32, 59), data.get("boot_str", "?"), "tiny", R.PALETTE["label"], anchor="mm")
 
 
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย

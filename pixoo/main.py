@@ -1,7 +1,7 @@
 """main.py — loop: อ่าน status.json -> วาด header + หน้าปัจจุบัน -> push ทั้งเฟรม
 รันคู่กับ divoom-sync เดิมได้ (คนละ script) หรือรวมเป็นหน้าใน rotation เดียวก็ได้
 """
-import json, time, datetime
+import json, time, datetime, subprocess
 from pixoo import Pixoo
 
 import renderer as R
@@ -14,6 +14,7 @@ STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี�
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 REFRESH    = 10               # วินาที/เฟรม (โชว์แค่ HH:MM ไม่ต้องถี่)
 PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ตอนมีหน้าเดียวไม่มีผล)
+UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
 ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
 
 
@@ -24,6 +25,29 @@ def read_uptime():
             return int(float(f.read().split()[0]))
     except Exception:
         return 0
+
+
+def read_temp():
+    # อุณหภูมิ CPU Pi (°C) จาก thermal_zone0 (millidegree)
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            return int(f.read().strip()) / 1000.0
+    except Exception:
+        return None
+
+
+def read_svc_uptime(svc, sys_uptime_s):
+    # วินาทีที่ service active มาแล้ว = uptime ระบบ − เวลาที่ service เข้าสถานะ active (monotonic)
+    try:
+        out = subprocess.run(
+            ["systemctl", "show", "-p", "ActiveEnterTimestampMonotonic", "--value", svc],
+            capture_output=True, text=True, timeout=5).stdout.strip()
+        mono_us = int(out)
+        if mono_us <= 0:
+            return None
+        return max(0, int(sys_uptime_s - mono_us / 1_000_000))
+    except Exception:
+        return None
 
 
 def read_status():
@@ -64,6 +88,9 @@ def main():
         up = read_uptime()                                 # uptime + เวลา boot ล่าสุด
         data["uptime_s"] = up
         data["boot_str"] = (datetime.datetime.now() - datetime.timedelta(seconds=up)).strftime("%d/%m %H:%M")
+        data["temp_c"] = read_temp()                       # อุณหภูมิ CPU
+        data["svc_uptime_s"] = read_svc_uptime(UPTIME_SVC, up)
+        data["svc_name"] = "FDR"
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()
