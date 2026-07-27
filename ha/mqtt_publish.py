@@ -8,12 +8,13 @@
 config/secrets ใน /etc/fr24-watchdog.env:
   MQTT_HOST, MQTT_PORT(1883), MQTT_USER, MQTT_PASS, STATION_ID(optional=hostname)
 """
-import json, socket, subprocess, sys
+import json, os, socket, subprocess, sys, time
 
 ENV_FILE = "/etc/fr24-watchdog.env"
 STATUS_F = "/run/fr24-watchdog/status.json"
 INBOUND_F = "/run/flight-watcher/inbound.json"
 TEMP_F = "/sys/class/thermal/thermal_zone0/temp"   # CPU temp Pi (millidegree)
+FAN_F = "/run/adsb-ha/fan.json"    # สถานะพัดลม (จาก HA ผ่าน MQTT) → Pixoo อ่านโชว์
 DISC = "homeassistant"          # HA discovery prefix (default)
 EXPIRE = 300                    # sensor เป็น unavailable ถ้าไม่มี state ใหม่ใน 5 นาที (timer=1m)
 
@@ -82,6 +83,38 @@ def pub(topic, payload, retain=True):
     subprocess.run(cmd, check=True, timeout=10)
 
 
+def sub_retained(topic):
+    # อ่าน retained message ล่าสุดของ topic (มีทันทีถ้า retained) — คืน str หรือ None ถ้าไม่ม/หมดเวลา
+    host = ENV.get("MQTT_HOST")
+    cmd = ["mosquitto_sub", "-h", host, "-p", ENV.get("MQTT_PORT", "1883"),
+           "-t", topic, "-C", "1", "-W", "2"]     # -C 1 เอา 1 ข้อความ · -W 2 รอ retained สูงสุด 2 วิ
+    if ENV.get("MQTT_USER"):
+        cmd += ["-u", ENV["MQTT_USER"]]
+    if ENV.get("MQTT_PASS"):
+        cmd += ["-P", ENV["MQTT_PASS"]]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=8).stdout.strip()
+        return out or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def update_fan_state():
+    # ดึงสถานะพัดลม (switch จริงจาก Tuya) ที่ HA publish ไว้ที่ adsb/<sid>/fan → เขียน /run/adsb-ha/fan.json
+    # HA automation ส่ง payload "on"/"off" (retained) เมื่อ switch เปลี่ยน. ไม่มี topic = on:null (ไม่รู้)
+    val = sub_retained(f"{BASE}/fan")
+    on = None if val is None else (val.strip().lower() in ("on", "true", "1"))
+    try:
+        os.makedirs(os.path.dirname(FAN_F), exist_ok=True)
+        tmp = FAN_F + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"ts": int(time.time()), "on": on}, f)
+        os.replace(tmp, FAN_F)
+        os.chmod(FAN_F, 0o644)
+    except OSError:
+        pass
+
+
 def publish_discovery():
     for oid, name, src, key, unit, sclass, icon in SENSORS:
         cfg = {
@@ -134,6 +167,7 @@ def main():
     except subprocess.CalledProcessError as e:
         print(f"mqtt_publish: publish ล้มเหลว (broker/creds?) — {e}")
         sys.exit(1)
+    update_fan_state()   # อ่านสถานะพัดลมกลับมาเขียน /run (best-effort — ไม่ทำให้ service fail)
 
 
 if __name__ == "__main__":

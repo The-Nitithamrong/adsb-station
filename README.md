@@ -174,6 +174,41 @@ sudo systemctl start adsb-agenda      # ดึงรอบแรกเลย · 
 (รันจาก repo → auto-update ดูแลให้; unit อยู่ใน `systemd/` → timer restart อัตโนมัติ. หน้า `NEXT`
 โผล่ใน rotation ของ Pixoo เอง; ถ้าไม่มีนัดจะโชว์ "no flt". ทดสอบ: `python3 agenda/agenda_fetch.py`)
 
+## พัดลมระบายความร้อน + สถานะบน Pixoo (optional — HA/Tuya)
+
+Pixoo หน้า UP โชว์ไอคอนพัดลม (เขียว=หมุน / หรี่=ปิด) จากสถานะ switch จริงของปลั๊ก Tuya.
+ทิศทางข้อมูลกลับด้าน: HA รู้สถานะ Tuya → republish เข้า MQTT → Pi อ่านมาเขียน `/run/adsb-ha/fan.json`.
+
+**1. Automation ใน HA — publish สถานะ switch เข้า MQTT** (Settings → Automations → Create → Edit in YAML).
+แก้ `switch.pi_fan_socket_1` เป็น entity ปลั๊กจริง และ `adsb/arin/fan` ให้ `arin` = STATION_ID (ตัวเล็ก):
+```yaml
+alias: Publish fan state to MQTT
+triggers:
+  - trigger: state
+    entity_id: switch.pi_fan_socket_1
+  - trigger: homeassistant
+    event: start
+actions:
+  - action: mqtt.publish
+    data:
+      topic: adsb/arin/fan
+      payload: "{{ states('switch.pi_fan_socket_1') }}"
+      retain: true
+mode: single
+```
+
+**2. ให้ mqtt_publish อ่านกลับ** — ไม่ต้องตั้งอะไรเพิ่ม: `mqtt_publish.py` subscribe `adsb/<sid>/fan`
+(retained) ทุกรอบ timer แล้วเขียน `/run/adsb-ha/fan.json` ให้ Pixoo เอง (RuntimeDirectory `adsb-ha`).
+หลัง `git pull` sync unit ใหม่ + restart:
+```bash
+sudo cp ~/adsb-station/systemd/adsb-ha-mqtt.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl start adsb-ha-mqtt
+cat /run/adsb-ha/fan.json      # {"ts": ..., "on": true/false}
+```
+
+**3. Automation เปิด/ปิดพัดลมตามอุณหภูมิ** (ตัวที่สั่งปลั๊กจริง) — trigger จาก `sensor.adsb_<host>_cpu_temperature`,
+above 70 → `switch.turn_on`, below 60 → `switch.turn_off` (มี hysteresis กันกระพริบ).
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash
