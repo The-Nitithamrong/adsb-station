@@ -7,3 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=arin
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/ha/mqtt_publish.py
+# สร้าง /run/adsb-ha (owned by arin) → เขียน fan.json (สถานะพัดลมจาก HA) ให้ Pixoo
+# Preserve=yes เพื่อให้ dir อยู่รอดระหว่างรอบ oneshot (ไม่โดนลบตอน service จบ)
+RuntimeDirectory=adsb-ha
+RuntimeDirectoryPreserve=yes

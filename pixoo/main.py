@@ -11,9 +11,11 @@ PIXOO_IP   = "192.168.41.143"
 STATUS_F   = "/run/fr24-watchdog/status.json"
 THA_F      = "/run/flight-watcher/inbound.json"   # THA inbound (เขียนโดย flight_watcher.py)
 AGENDA_F   = "/run/agenda/next.json"               # เที่ยวบินถัดไป (เขียนโดย agenda_fetch.py)
+FAN_F      = "/run/adsb-ha/fan.json"                # สถานะพัดลม (เขียนโดย mqtt_publish.py)
 STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี้ = ถือว่า stale
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 AGENDA_STALE_SEC = 6 * 3600   # agenda เก่ากว่านี้ (fetch ตายไปนาน) = ไม่โชว์
+FAN_STALE_SEC = 5 * 60        # fan.json เก่ากว่านี้ (bridge ตาย) = ไม่รู้สถานะ
 REFRESH    = 10               # วินาที/เฟรม (โชว์แค่ HH:MM ไม่ต้องถี่)
 PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ตอนมีหน้าเดียวไม่มีผล)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
@@ -93,6 +95,18 @@ def read_agenda():
         return None
 
 
+def read_fan():
+    # สถานะพัดลม: True=หมุน / False=ปิด / None=ไม่รู้ (ไม่มีไฟล์ / stale / bridge ยังไม่ตั้ง)
+    try:
+        with open(FAN_F) as f:
+            d = json.load(f)
+        if time.time() - d.get("ts", 0) > FAN_STALE_SEC:
+            return None
+        return d.get("on")
+    except Exception:
+        return None
+
+
 def main():
     pixoo = Pixoo(PIXOO_IP)
     tick = 0
@@ -109,6 +123,7 @@ def main():
         data["svc_uptime_s"] = read_svc_uptime(UPTIME_SVC, up)
         data["svc_name"] = "FDR"
         data["agenda"] = read_agenda()                     # เที่ยวบินถัดไป (Google Calendar)
+        data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()

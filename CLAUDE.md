@@ -61,7 +61,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   publishes /run status+inbound to MQTT with Home Assistant discovery (retained config + state) every
   1 min via `mosquitto_pub` (apt mosquitto-clients; stdlib only). HA + Mosquitto run as Docker
   containers (`deploy/homeassistant/docker-compose.yml`). MQTT creds (`MQTT_HOST/PORT/USER/PASS`) in
-  /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, received count, THA flight/ETA/dist.
+  /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, **CPU temp** (device_class temperature),
+  received count, THA flight/ETA/dist. Also SUBSCRIBES (reverse direction) to `adsb/<sid>/fan` (retained,
+  published by an HA automation on the Tuya cooling-fan switch) via `mosquitto_sub -C 1 -W 2` and writes
+  `/run/adsb-ha/fan.json` for the Pixoo UP-page fan icon (real switch state, ~1 min lag).
 - `deploy/adsb-autoupdate.sh` (+ `systemd/adsb-autoupdate.{service,timer}`) — OPTIONAL: Pi auto-pulls
   `origin/main` every ~10 min (`merge --ff-only`, skips on local conflicts), then syncs
   `/usr/local/bin` + unit files and restarts only the changed services. Runs from `/usr/local/bin`
@@ -76,6 +79,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `RuntimeDirectoryPreserve=yes` so the oneshot's dir survives between runs):
   `{ts, summary, code, route, start_ts, start_str, in_min, all_day}` or `{ts, summary: null}` when no
   upcoming event. Pixoo recomputes `in_min` live from `start_ts` each tick (fetched value can be stale).
+- `/run/adsb-ha/fan.json` — written by mqtt_publish (arin; via `RuntimeDirectory=adsb-ha` +
+  `RuntimeDirectoryPreserve=yes`): `{ts, on}` where `on` = true/false/null (null = HA fan topic not
+  set up / bridge down). Source = HA automation republishing the Tuya switch state to `adsb/<sid>/fan`.
+  Pixoo derives unknown from `ts` age (`FAN_STALE_SEC`) → hides the icon.
 
 ## Conventions / guardrails
 - SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*, GCAL_ICS_URL). NEVER commit .env or *.db.
