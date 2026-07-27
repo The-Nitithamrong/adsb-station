@@ -116,6 +116,24 @@ def next_flight(d, data):
     R.text(d, (60, 55), _countdown(mins), "tiny", ccol, anchor="ra")
 
 
+# vcgencmd get_throttled — บิตปัจจุบัน (0-3) เรียงตามความสำคัญ · บิตประวัติ (+16 = เคยเกิด)
+_THR_NOW = [(0x1, "UV"), (0x4, "THR"), (0x2, "CAP"), (0x8, "TMP")]
+_THR_EVER = [(0x10000, "UV"), (0x40000, "THR"), (0x20000, "CAP"), (0x80000, "TMP")]
+
+
+def _throttle(raw):
+    """คืน (word, sev): 'bad'=มีปัญหาตอนนี้(แดง) · 'warn'=เคยเกิด(เหลือง) · 'ok'(เขียว) · (None,None)=ไม่รู้"""
+    if raw is None:
+        return (None, None)
+    for b, w in _THR_NOW:
+        if raw & b:
+            return (w, "bad")
+    for b, w in _THR_EVER:
+        if raw & b:
+            return (w.lower(), "warn")
+    return ("OK", "ok")
+
+
 def _fmt2(s):
     """uptime เป็น 2 หน่วยบนสุด เช่น '3D 14H' / '14H 22M' / '22M'"""
     d, r = divmod(int(s), 86400)
@@ -152,10 +170,14 @@ def uptime(d, data):
     hero = f"{days}D" if days else (f"{hours}H" if hours else f"{mins}M")
     R.text(d, (32, 36), hero, "big", R.PALETTE["time"], anchor="ma")
 
-    # แถวล่าง (tiny): service uptime (FDR) + เวลา boot ล่าสุด
+    # แถวล่าง (tiny): service uptime (FDR) ซ้าย · สถานะ power/throttle ขวา · เวลา boot ล่างสุด
     su = data.get("svc_uptime_s")
     svc = f"{data.get('svc_name', 'SVC')} " + (_fmt2(su) if su is not None else "--")
-    R.text(d, (32, 53), svc, "tiny", R.PALETTE["label"], anchor="mm")
+    R.text(d, (3, 53), svc, "tiny", R.PALETTE["label"], anchor="la")
+    tw, tsev = _throttle(data.get("throttled"))
+    if tw:
+        tcol = {"bad": R.HEALTH["dead"], "warn": R.HEALTH["recovering"], "ok": R.HEALTH["ok"]}[tsev]
+        R.text(d, (61, 53), tw, "tiny", tcol, anchor="ra")
     R.text(d, (32, 59), data.get("boot_str", "?"), "tiny", R.PALETTE["label"], anchor="mm")
 
 

@@ -40,6 +40,17 @@ def read_temp():
         return None
 
 
+def read_throttled():
+    # vcgencmd get_throttled → int bitmask ("throttled=0x50005") หรือ None (ไม่มีสิทธิ์/ไม่ใช่ Pi)
+    # ต้องอยู่กลุ่ม video: sudo usermod -aG video arin (ไม่งั้นได้ None)
+    try:
+        out = subprocess.run(["vcgencmd", "get_throttled"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        return int(out.split("=")[1], 16)
+    except Exception:
+        return None
+
+
 def read_svc_uptime(svc, sys_uptime_s):
     # วินาทีที่ service active มาแล้ว = uptime ระบบ − เวลาที่ service เข้าสถานะ active (monotonic)
     try:
@@ -124,6 +135,7 @@ def main():
         data["svc_name"] = "FDR"
         data["agenda"] = read_agenda()                     # เที่ยวบินถัดไป (Google Calendar)
         data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
+        data["throttled"] = read_throttled()               # undervoltage / thermal throttle (Pi)
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()

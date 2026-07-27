@@ -47,6 +47,7 @@ SENSORS = [
     ("feeder_rate",       "Feeder rate",       "feeder",  "msg_per_s", "msg/s", "measurement", "mdi:speedometer"),
     ("feeder_aircraft",   "Aircraft (feeder)", "feeder",  "aircraft",  None,    "measurement", "mdi:airplane"),
     ("cpu_temp",          "CPU temperature",   "feeder",  "cpu_temp",  "°C",    "measurement", "mdi:thermometer"),
+    ("throttle",          "Power/throttle",    "feeder",  "throttle",  None,    None,          "mdi:flash-alert"),
     ("received_aircraft", "Aircraft received", "inbound", "nrx",       None,    "measurement", "mdi:airplane-search"),
     ("tha_flight",        "THA inbound",       "inbound", "flight",    None,    None,          "mdi:airplane-landing"),
     ("tha_eta",           "THA ETA",           "inbound", "eta_min",   "min",   "measurement", "mdi:timer"),
@@ -69,6 +70,29 @@ def read_temp():
             return round(int(f.read().strip()) / 1000.0, 1)
     except (OSError, ValueError):
         return None
+
+
+# vcgencmd get_throttled — บิตปัจจุบัน (0-3) และประวัติ (+16)
+_THR_NOW = [(0x1, "undervoltage"), (0x4, "throttled"), (0x2, "freq-capped"), (0x8, "soft-temp")]
+_THR_EVER = [(0x10000, "undervoltage"), (0x40000, "throttled"), (0x20000, "freq-capped"), (0x80000, "soft-temp")]
+
+
+def read_throttled():
+    # สถานะ power/thermal ของ Pi เป็นข้อความอ่านง่ายสำหรับ HA — "ok" / "undervoltage" / "ok (… occurred)"
+    # ต้องอยู่กลุ่ม video (sudo usermod -aG video arin) ไม่งั้นได้ "unknown"
+    try:
+        out = subprocess.run(["vcgencmd", "get_throttled"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        raw = int(out.split("=")[1], 16)
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return "unknown"
+    now = [name for bit, name in _THR_NOW if raw & bit]
+    if now:
+        return ",".join(now)
+    ever = [name for bit, name in _THR_EVER if raw & bit]
+    if ever:
+        return "ok (" + ",".join(ever) + " occurred)"
+    return "ok"
 
 
 def pub(topic, payload, retain=True):
@@ -143,6 +167,7 @@ def publish_state():
         "msg_per_s": feeder.get("msg_per_s", 0),
         "aircraft": feeder.get("aircraft", 0),
         "cpu_temp": read_temp(),
+        "throttle": read_throttled(),
     }
     inbound_state = {
         "nrx": inb.get("nrx", 0),
