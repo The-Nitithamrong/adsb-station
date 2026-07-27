@@ -150,6 +150,12 @@ sudo systemctl start adsb-ha-mqtt         # ยิงรอบแรก · ด�
 ```
 (publisher รันจาก repo → auto-update ดูแลให้; unit อยู่ใน `systemd/` → timer restart อัตโนมัติ)
 
+**power/throttle sensor** (`vcgencmd get_throttled` — จับ undervoltage / thermal throttle ของ Pi,
+โผล่ทั้ง HA sensor "Power/throttle" และหน้า UP บน Pixoo) ต้องให้ user `arin` อยู่กลุ่ม `video`:
+```bash
+sudo usermod -aG video arin      # แล้ว logout/login หรือ restart service (ไม่งั้นอ่านได้ "unknown")
+```
+
 ## Next flight บน Pixoo (optional — เที่ยวบินถัดไปจาก Google Calendar)
 
 หน้า `NEXT` บน Pixoo โชว์เที่ยวบิน/นัดถัดไป (code + route + นับถอยหลัง) ดึงจาก Google Calendar.

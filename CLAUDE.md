@@ -62,6 +62,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   1 min via `mosquitto_pub` (apt mosquitto-clients; stdlib only). HA + Mosquitto run as Docker
   containers (`deploy/homeassistant/docker-compose.yml`). MQTT creds (`MQTT_HOST/PORT/USER/PASS`) in
   /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, **CPU temp** (device_class temperature),
+  **power/throttle** (`vcgencmd get_throttled` decoded: ok / undervoltage / throttled / freq-capped /
+  soft-temp / "ok (… occurred)" sticky history — needs user in group `video`, else "unknown"),
   received count, THA flight/ETA/dist. Also SUBSCRIBES (reverse direction) to `adsb/<sid>/fan` (retained,
   published by an HA automation on the Tuya cooling-fan switch) via `mosquitto_sub -C 1 -W 2` and writes
   `/run/adsb-ha/fan.json` for the Pixoo UP-page fan icon (real switch state, ~1 min lag).
