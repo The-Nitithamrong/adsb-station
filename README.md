@@ -220,7 +220,8 @@ above 50 → `switch.turn_on`, below 45 → `switch.turn_off` (hysteresis กั
 > → entity จริงคือ **`sensor.ads_b_<host>_*`** (เช่น `sensor.ads_b_arin_cpu_temperature`,
 > `sensor.ads_b_arin_power_throttle`) **ไม่ใช่** `adsb_...` ที่เดา. ถ้าใส่ชื่อผิด numeric_state condition
 > จะเป็น False เงียบๆ (พัดลมไม่ทำงานทั้ง on/off). **คัดลอกชื่อจริงจาก Developer Tools → States เสมอ**.
-> HA unit system ต้องเป็น **Metric** ด้วย ไม่งั้น temp เป็น °F แล้ว threshold เพี้ยน (Settings → System → General).
+> CPU temp sensor จงใจ**ไม่ใส่** `device_class: temperature` → ค่าคงเป็น °C ดิบเสมอ ไม่ว่า HA ตั้งหน่วยอะไร
+> (device_class ทำให้ HA แปลง °C↔°F ซึ่ง revert ได้ตอน config เสีย แล้ว threshold เพี้ยน) → threshold ใช้ °C ตรงๆ.
 
 ## Hardware watchdog (optional — Pi reboot เองเมื่อแฮงค์ทั้งตัว)
 
