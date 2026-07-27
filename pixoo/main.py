@@ -17,6 +17,15 @@ PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ต�
 ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
 
 
+def read_uptime():
+    # วินาทีตั้งแต่ Pi boot ล่าสุด (/proc/uptime — world-readable)
+    try:
+        with open("/proc/uptime") as f:
+            return int(float(f.read().split()[0]))
+    except Exception:
+        return 0
+
+
 def read_status():
     # --- แหล่งข้อมูล: อ่านไฟล์ local (Pi ตัวเดียวกับ watchdog) ---
     # ถ้าอยู่คนละ Pi เปลี่ยนเป็น HTTP:
@@ -52,6 +61,9 @@ def main():
         data["tha"] = inb if inb.get("flight") else None   # THA inbound (หรือ None)
         data["flights"] = inb.get("list", [])              # list เครื่องที่รับได้
         data["nrx"] = inb.get("nrx", 0)
+        up = read_uptime()                                 # uptime + เวลา boot ล่าสุด
+        data["uptime_s"] = up
+        data["boot_str"] = (datetime.datetime.now() - datetime.timedelta(seconds=up)).strftime("%d/%m %H:%M")
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
 
         img, d = R.new_frame()

@@ -73,5 +73,23 @@ def flights_list(d, data):
         R.text(d, (48, y), f"{fl.get('fl', 0):03d}", "tiny", R.PALETTE["label"], anchor="la")
 
 
+def uptime(d, data):
+    """หน้า UP — สถานีรันมานานเท่าไหร่ตั้งแต่ boot ล่าสุด + เวลา restart ล่าสุด"""
+    up = data.get("uptime_s", 0)
+    days, rem = divmod(up, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins = rem // 60
+
+    R.text(d, (4, 28), "UP", "small", R.PALETTE["title"], anchor="la")
+
+    # hero: หน่วยที่ใหญ่สุด (วัน/ชม./นาที) — cyan
+    hero = f"{days}D" if days else (f"{hours}H" if hours else f"{mins}M")
+    R.text(d, (32, 34), hero, "big", R.PALETTE["time"], anchor="ma")
+
+    # แถวล่าง (tiny): breakdown เต็ม + เวลา boot ล่าสุด
+    R.text(d, (32, 52), f"{days}D {hours}H {mins}M", "tiny", R.PALETTE["label"], anchor="mm")
+    R.text(d, (32, 58), data.get("boot_str", "?"), "tiny", R.PALETTE["label"], anchor="mm")
+
+
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
-PAGES = [feeder_status, tha_inbound, flights_list]
+PAGES = [feeder_status, tha_inbound, flights_list, uptime]
