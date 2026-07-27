@@ -222,6 +222,20 @@ above 50 → `switch.turn_on`, below 45 → `switch.turn_off` (hysteresis กั
 > จะเป็น False เงียบๆ (พัดลมไม่ทำงานทั้ง on/off). **คัดลอกชื่อจริงจาก Developer Tools → States เสมอ**.
 > HA unit system ต้องเป็น **Metric** ด้วย ไม่งั้น temp เป็น °F แล้ว threshold เพี้ยน (Settings → System → General).
 
+## Hardware watchdog (optional — Pi reboot เองเมื่อแฮงค์ทั้งตัว)
+
+`fr24-watchdog` เป็น software watchdog — กู้ **dongle** ได้ แต่ถ้า **ทั้ง Pi แฮงค์** (kernel lockup /
+SD I/O stall / soft hang) มันตายไปด้วย กู้อะไรไม่ได้เลย. hardware watchdog (ตัวจับเวลาในชิป Pi)
+ให้ systemd "ป้อน" เรื่อยๆ — ถ้า systemd/kernel แฮงค์เกิน 15 วิ **ฮาร์ดแวร์ reset Pi เอง** → self-heal
+จาก full hang โดยไม่ต้องเดินไปถอดปลั๊ก (roadmap #6). *(ไม่ช่วยกรณีไฟดับสนิท — นั่นแก้ที่ power supply.)*
+
+```bash
+sudo bash ~/adsb-station/deploy/enable-hw-watchdog.sh    # รันครั้งเดียว (idempotent)
+```
+- ตั้ง `RuntimeWatchdogSec=15` + `RebootWatchdogSec=2min` ใน `/etc/systemd/system.conf` แล้ว `daemon-reexec`.
+- ตรวจสอบ: `systemctl show -p RuntimeWatchdogUSec` (ควร > 0) · `dmesg | grep -i watchdog`.
+- ทดสอบจริง (⚠️ Pi จะ reboot): `echo c | sudo tee /proc/sysrq-trigger` → kernel panic → ควร reset เอง ~15 วิ.
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash
