@@ -112,4 +112,5 @@ def uptime(d, data):
 
 
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
-PAGES = [feeder_status, tha_inbound, flights_list, uptime]
+# (tha_inbound / flights_list เก็บฟังก์ชันไว้ ใส่กลับใน list ได้ทุกเมื่อ)
+PAGES = [feeder_status, uptime]
