@@ -237,6 +237,22 @@ sudo bash ~/adsb-station/deploy/enable-hw-watchdog.sh    # รันครั้
 - ตรวจสอบ: `systemctl show -p RuntimeWatchdogUSec` (ควร > 0) · `dmesg | grep -i watchdog`.
 - ทดสอบจริง (⚠️ Pi จะ reboot): `echo c | sudo tee /proc/sysrq-trigger` → kernel panic → ควร reset เอง ~15 วิ.
 
+## Daily status → Telegram (สรุปสถานะวันละครั้ง 09:00)
+
+แทนการเตือน THA ทุกเที่ยว (noise) ด้วย digest สั้นๆ วันละครั้ง 09:00 เวลากรุงเทพ — feeder health/rate/
+จำนวนเครื่อง + Pi uptime/อุณหภูมิ/undervoltage/load/disk/RAM. (watchdog ยังเตือนแยกตอนสถานีล่มตามเดิม)
+
+```bash
+sudo cp ~/adsb-station/systemd/adsb-daily-report.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now adsb-daily-report.timer
+sudo systemctl start adsb-daily-report      # ทดสอบส่งเลย · ดู: journalctl -u adsb-daily-report
+systemctl list-timers adsb-daily-report.timer   # เช็คว่ายิง 09:00 ถัดไป
+```
+- ใช้ `TG_API`/`TG_CHAT` เดิมใน `/etc/fr24-watchdog.env` (ไม่ต้องตั้งเพิ่ม)
+- timer ระบุ `Asia/Bangkok` ตรงๆ → 09:00 กรุงเทพเสมอ ไม่ว่า Pi ตั้ง tz อะไร
+- (unit อยู่ใน `systemd/` → auto-update restart timer ให้เอง)
+
 ## ทดสอบก่อนรันเป็น service
 
 ```bash

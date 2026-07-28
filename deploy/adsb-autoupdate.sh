@@ -37,7 +37,7 @@ if grep -q '^deploy/adsb-autoupdate.sh$' <<<"$CHANGED"; then
 fi
 if grep -q '^systemd/' <<<"$CHANGED"; then
     cp "$REPO"/systemd/*.service "$REPO"/systemd/*.timer /etc/systemd/system/ && systemctl daemon-reload && log "synced unit files + daemon-reload"
-    for t in fr24-watchdog.timer adsb-autoupdate.timer adsb-outbox.timer adsb-ha-mqtt.timer adsb-agenda.timer; do
+    for t in fr24-watchdog.timer adsb-autoupdate.timer adsb-outbox.timer adsb-ha-mqtt.timer adsb-agenda.timer adsb-daily-report.timer; do
         systemctl is-enabled "$t" >/dev/null 2>&1 && systemctl restart "$t"
     done
 fi

@@ -1,0 +1,9 @@
+[Unit]
+Description=ADS-B daily status digest (Pi + FR24) -> Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=arin
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/report/daily_status.py
