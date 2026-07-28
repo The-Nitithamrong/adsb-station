@@ -33,7 +33,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 ## Files
 - `watchdog/fr24-watchdog.sh` — health check + escalation (L1 restart → L2 uhubctl → L3 alert)
   + healthchecks.io heartbeat. Runs via systemd timer every 5 min.
-- `flightwatch/flight_watcher.py` — 30003 → THA inbound VTBS → ETA≤30m → dedupe → Telegram + SQLite.
+- `flightwatch/flight_watcher.py` — 30003 → THA inbound VTBS → ETA≤30m → dedupe → SQLite `events`.
+  (Per-flight Telegram REMOVED — was noise; replaced by the daily digest below. `notify()` kept but unused.)
   Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page,
   and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
 - `flightwatch/track_stats.py` — reads `tracks`: coverage floor (how low we still receive near VTBS),
@@ -41,6 +42,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   STAR entry gates (all FL180, coords from the RNAV chart) are in `STAR_FIXES`:
   WILLA/NORTA/EASTE/TUMGA/LEBIM; a flight passing within `STAR_FIX_RADIUS_NM` is tagged with its gate.
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
+- `report/daily_status.py` (+ `systemd/adsb-daily-report.{service,timer}`) — sends a once-a-day Telegram
+  digest at 09:00 Asia/Bangkok (timer `OnCalendar=... Asia/Bangkok`): feeder health/rate/aircraft (from
+  status.json) + Pi uptime/temp/throttle(undervoltage)/load/disk/RAM. stdlib (urllib), reuses TG_API/
+  TG_CHAT. This is a heartbeat — the watchdog L3 station-down alert still fires independently.
 - `flightwatch/outbox.py` (+ `systemd/adsb-outbox.{service,timer}`) — OPTIONAL forwarder: sends new
   `events`+`tracks` rows to a cloud sink (Cloudflare D1 now) every ~10 min. Adds a `sent` column to
   each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows queue

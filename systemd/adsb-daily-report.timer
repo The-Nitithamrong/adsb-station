@@ -1,0 +1,10 @@
+[Unit]
+Description=Send ADS-B daily status at 09:00 Asia/Bangkok
+
+[Timer]
+# ระบุ timezone ตรงๆ → ยิง 09:00 เวลากรุงเทพเสมอ ไม่ว่า Pi ตั้ง tz อะไร
+OnCalendar=*-*-* 09:00:00 Asia/Bangkok
+Persistent=false
+
+[Install]
+WantedBy=timers.target

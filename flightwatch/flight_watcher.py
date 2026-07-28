@@ -200,11 +200,9 @@ def check(hexid, p):
     if e <= ETA_ALERT_MIN:
         p["notified"] = True
         p["alert_ts"] = int(time.time()); p["alert_eta"] = round(e, 1)   # ไว้เทียบ ETA จริงใน tracks
-        msg = (f"✈️ {cs} inbound VTBS\n"
-               f"ETA ~{e:.0f} นาที | {p['dist']:.0f} nm | "
-               f"FL{(p['alt'] or 0)//100:03d} | {p['gs']} kt\n"
-               f"hex {hexid} | {time.strftime('%H:%M')}")
-        notify(msg)
+        # ไม่ยิง Telegram ต่อเที่ยวแล้ว (noise) — ย้ายไป daily digest 09:00 (report/daily_status.py).
+        # ยังบันทึก events + inbound.json (Pixoo) + tracks ตามเดิม เพื่อวิเคราะห์/แสดงผล.
+        print(f"  >>> {cs} inbound VTBS ETA ~{e:.0f}m (logged, no TG)")
         db.execute("INSERT INTO events VALUES (?,?,?,?,?,?,?)",
                    (int(time.time()), cs, hexid, round(e, 1),
                     round(p["dist"], 1), p["gs"], p["alt"]))
