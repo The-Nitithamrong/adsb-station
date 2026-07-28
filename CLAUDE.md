@@ -58,6 +58,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `uptime`,
   `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotated 180° (upside-down mount).
+  ANIMATION: main loop reads /run data every `REFRESH`s but pushes `ANIM_FPS` frames/s (default 2) — a
+  health-colored `draw_scanner()` comet travels the frame border on every page (only it + the clock move,
+  page content stays). Push wrapped in try/except (Pixoo WiFi drops crash-looped before). Tune SCAN_SPEED/
+  SCAN_TAIL in renderer, ANIM_FPS in main.
 - `agenda/agenda_fetch.py` (+ `systemd/adsb-agenda.{service,timer}`) — OPTIONAL: fetches the next Google
   Calendar event (next flight) via the calendar's **private iCal (ICS) secret URL** over HTTPS (stdlib
   urllib — NO OAuth, runs anywhere), parses the soonest upcoming VEVENT (skips RRULE/past), extracts
