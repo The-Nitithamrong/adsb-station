@@ -1,11 +1,11 @@
 """main.py — loop: อ่าน status.json -> วาด header + หน้าปัจจุบัน -> push ทั้งเฟรม
 รันคู่กับ divoom-sync เดิมได้ (คนละ script) หรือรวมเป็นหน้าใน rotation เดียวก็ได้
 """
-import json, time, datetime, subprocess
+import json, time, datetime, subprocess, urllib.request
 from pixoo import Pixoo
 
 import renderer as R
-from pages import PAGES
+from pages import PAGES, coffee_break
 
 PIXOO_IP   = "192.168.41.143"
 STATUS_F   = "/run/fr24-watchdog/status.json"
@@ -21,6 +21,21 @@ ANIM_FPS   = 2                # เฟรม/วินาที สำหรั�
 PAGE_HOLD  = 8                # กี่รอบข้อมูลต่อ 1 หน้า (1 รอบ = REFRESH วินาที)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
 ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
+COFFEE_START_H = 8            # หน้า coffee break เตือนตรงชั่วโมง ช่วง [START..END] (เวลาเครื่อง = BKK)
+COFFEE_END_H   = 20
+COFFEE_SHOW_SEC = 30          # โชว์หน้ากาแฟนานเท่าไหร่ต่อครั้ง
+COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",   # ~3 บี๊บสั้น (200ms on / 300ms off × 3 ใน 1500ms)
+               "PlayTotalTime": 1500, "PlayPulseTime": 200, "PlayOffTime": 300}
+
+
+def buzz(ip):
+    # สั่ง buzzer บน Pixoo (Divoom API) — เสียงสั้นๆ 2-3 ครั้ง เตือนพักกาแฟ
+    try:
+        req = urllib.request.Request(f"http://{ip}/post", data=json.dumps(COFFEE_BUZZ).encode(),
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print("buzz failed:", e)
 
 
 def read_uptime():
@@ -125,6 +140,8 @@ def main():
     anim_sleep = 1.0 / ANIM_FPS
     tick = 0        # นับรอบข้อมูล (ใช้เลือกหน้า)
     phase = 0       # เฟรม animation สะสม (ใช้ขยับ scanner)
+    last_slot = datetime.datetime.now().strftime("%Y%m%d%H")   # ชั่วโมงล่าสุด (กัน beep ซ้ำ; init = ตอนเริ่ม)
+    coffee_until = 0.0                                          # โชว์หน้ากาแฟจนถึง ts นี้
     while True:
         data = read_status()
         inb = read_inbound()
@@ -140,7 +157,16 @@ def main():
         data["agenda"] = read_agenda()                     # เที่ยวบินถัดไป (Google Calendar)
         data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
         data["throttled"] = read_throttled()               # undervoltage / thermal throttle (Pi)
-        page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
+
+        # coffee break: ตรงชั่วโมงใหม่ ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ ~30 วิ
+        now_dt = datetime.datetime.now()
+        slot = now_dt.strftime("%Y%m%d%H")
+        if slot != last_slot:
+            if COFFEE_START_H <= now_dt.hour <= COFFEE_END_H:
+                coffee_until = time.time() + COFFEE_SHOW_SEC
+                buzz(PIXOO_IP)
+            last_slot = slot
+        page = coffee_break if time.time() < coffee_until else PAGES[(tick // PAGE_HOLD) % len(PAGES)]
         health = data.get("health", "stale")
         scan_col = R.HEALTH.get(health, R.HEALTH["stale"])
 

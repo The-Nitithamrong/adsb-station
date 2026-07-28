@@ -182,6 +182,28 @@ def uptime(d, data):
     R.text(d, (32, 59), data.get("boot_str", "?"), "tiny", R.PALETTE["label"], anchor="mm")
 
 
+def coffee_break(d, data):
+    """หน้าเตือนพักกาแฟ (โผล่ตามเวลา ไม่อยู่ในรอบหมุนปกติ) — ถ้วยกาแฟ + ไอลอย (ขยับตาม anim)"""
+    cup = (168, 120, 74)          # น้ำตาลกาแฟ
+    R.text(d, (4, 28), "BREAK", "small", R.PALETTE["title"], anchor="la")
+
+    # ไอกาแฟลอยขึ้น 3 เส้น — หยักซ้าย-ขวาตาม anim = เคลื่อนไหว
+    a = data.get("anim", 0)
+    for i, cx in enumerate((27, 32, 37)):
+        for j in range(3):
+            x = cx + (1 if (a + i + j) % 2 else -1)
+            d.point((x, 33 + j * 2), fill=(120, 140, 160))
+
+    # ถ้วย (สี่เหลี่ยม + ขอบปาก) + หูจับ + กาแฟ + จานรอง
+    d.rectangle([(23, 41), (39, 53)], outline=cup)
+    d.line([(23, 41), (39, 41)], fill=(210, 160, 96))
+    d.rectangle([(39, 44), (43, 50)], outline=cup)         # หูจับ
+    d.rectangle([(25, 43), (37, 45)], fill=(96, 62, 38))   # ผิวกาแฟ
+    d.line([(20, 55), (42, 55)], fill=cup)                 # จานรอง
+
+    R.text(d, (32, 59), "COFFEE TIME", "tiny", R.PALETTE["label"], anchor="mm")
+
+
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
 # (tha_inbound / flights_list เก็บฟังก์ชันไว้ ใส่กลับใน list ได้ทุกเมื่อ)
 PAGES = [feeder_status, uptime, next_flight]
