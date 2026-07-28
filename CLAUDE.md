@@ -44,8 +44,11 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
 - `report/daily_status.py` (+ `systemd/adsb-daily-report.{service,timer}`) — sends a once-a-day Telegram
   digest at 09:00 Asia/Bangkok (timer `OnCalendar=... Asia/Bangkok`): feeder health/rate/aircraft (from
-  status.json) + Pi uptime/temp/throttle(undervoltage)/load/disk/RAM. stdlib (urllib), reuses TG_API/
-  TG_CHAT. This is a heartbeat — the watchdog L3 station-down alert still fires independently.
+  status.json) + Pi uptime/temp/throttle(undervoltage)/load/disk/RAM + today's fan on-count/on-time.
+  stdlib (urllib), reuses TG_API/TG_CHAT. Heartbeat — the watchdog L3 station-down alert still fires too.
+- `report/fan_stats.py` — per-day fan on-count + total on-time from `/home/arin/fan_events.jsonl`
+  (append-only `{ts,on}` log written by mqtt_publish on every switch on↔off transition, ~1-min res).
+  `python3 fan_stats.py [days]`; `today_stats()` is imported by daily_status for the digest line.
 - `flightwatch/outbox.py` (+ `systemd/adsb-outbox.{service,timer}`) — OPTIONAL forwarder: sends new
   `events`+`tracks` rows to a cloud sink (Cloudflare D1 now) every ~10 min. Adds a `sent` column to
   each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows queue

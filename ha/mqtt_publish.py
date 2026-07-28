@@ -15,6 +15,7 @@ STATUS_F = "/run/fr24-watchdog/status.json"
 INBOUND_F = "/run/flight-watcher/inbound.json"
 TEMP_F = "/sys/class/thermal/thermal_zone0/temp"   # CPU temp Pi (millidegree)
 FAN_F = "/run/adsb-ha/fan.json"    # สถานะพัดลม (จาก HA ผ่าน MQTT) → Pixoo อ่านโชว์
+FAN_LOG = "/home/arin/fan_events.jsonl"   # log ทุก on/off (persistent) → report/fan_stats.py
 DISC = "homeassistant"          # HA discovery prefix (default)
 EXPIRE = 300                    # sensor เป็น unavailable ถ้าไม่มี state ใหม่ใน 5 นาที (timer=1m)
 
@@ -123,16 +124,33 @@ def sub_retained(topic):
         return None
 
 
+def _prev_fan_on():
+    try:
+        with open(FAN_F) as f:
+            return json.load(f).get("on")
+    except (OSError, ValueError):
+        return None
+
+
 def update_fan_state():
     # ดึงสถานะพัดลม (switch จริงจาก Tuya) ที่ HA publish ไว้ที่ adsb/<sid>/fan → เขียน /run/adsb-ha/fan.json
     # HA automation ส่ง payload "on"/"off" (retained) เมื่อ switch เปลี่ยน. ไม่มี topic = on:null (ไม่รู้)
     val = sub_retained(f"{BASE}/fan")
     on = None if val is None else (val.strip().lower() in ("on", "true", "1"))
+    prev = _prev_fan_on()
+    now = int(time.time())
+    # log transition (on↔off) ลงไฟล์ persistent → ดูความถี่/เวลารวมต่อวันได้ (poll 1 นาที = ความละเอียดพอ)
+    if on is not None and prev is not None and on != prev:
+        try:
+            with open(FAN_LOG, "a") as f:
+                f.write(json.dumps({"ts": now, "on": on}) + "\n")
+        except OSError:
+            pass
     try:
         os.makedirs(os.path.dirname(FAN_F), exist_ok=True)
         tmp = FAN_F + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"ts": int(time.time()), "on": on}, f)
+            json.dump({"ts": now, "on": on}, f)
         os.replace(tmp, FAN_F)
         os.chmod(FAN_F, 0o644)
     except OSError:

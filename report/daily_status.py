@@ -120,12 +120,22 @@ def build_message():
     tstr = f"{temp:.0f}°C" if temp is not None else "?"
     thr_str = ("⚡ok" if thr == "ok" else f"⚠️ {thr}") if thr is not None else "⚡?"
     host = socket.gethostname()
+    fan_line = ""
+    try:
+        import fan_stats
+        fc, fm = fan_stats.today_stats()
+        h, mm = divmod(fm, 60)
+        dur = f"{h}ชม {mm}น" if h else f"{mm}น"
+        fan_line = f"\n🌀 พัดลมวันนี้: {fc} ครั้ง · รวม {dur}"
+    except Exception:
+        pass
     return (
         f"📡 ADS-B {host} — {_time.strftime('%Y-%m-%d')}\n"
         f"{FEED_EMOJI.get(health, '❓')} Feeder: {health} · {st.get('msg_per_s', 0)} msg/s · "
         f"{st.get('aircraft', 0)} ลำ\n"
         f"🖥 Pi: up {fmt_uptime(up)} · {tstr} · {thr_str}\n"
         f"📊 load {read_load()} · disk {read_disk_pct()} · RAM {read_mem_free()} ว่าง"
+        f"{fan_line}"
     )
 
 
