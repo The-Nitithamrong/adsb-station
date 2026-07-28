@@ -90,8 +90,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   re-check (numeric_state only fires on threshold *crossings* — a missed edge leaves the fan stuck).
 - `deploy/adsb-autoupdate.sh` (+ `systemd/adsb-autoupdate.{service,timer}`) — OPTIONAL: Pi auto-pulls
   `origin/main` every ~10 min (`merge --ff-only`, skips on local conflicts), then syncs
-  `/usr/local/bin` + unit files and restarts only the changed services. Runs from `/usr/local/bin`
-  (self-updates). Install once (see README); once on, merged changes deploy without a manual `git pull`.
+  `/usr/local/bin` + unit files and restarts changed services. On any `systemd/` change it also
+  AUTO-ENABLES repo timers that are `disabled` (new timers deploy hands-free, no SSH) and restarts
+  `enabled` ones; `masked` timers are skipped (use `systemctl mask` to keep one off). Runs from
+  `/usr/local/bin` (self-updates). Install once (see README); merged changes deploy without a manual pull.
 
 ## Runtime data contract (JSON in /run, world-readable — NOT secret)
 - `/run/fr24-watchdog/status.json` — written by watchdog each run (root; chmod 644 so pixoo/arin reads):
