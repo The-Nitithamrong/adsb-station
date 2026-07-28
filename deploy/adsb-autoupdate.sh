@@ -37,8 +37,15 @@ if grep -q '^deploy/adsb-autoupdate.sh$' <<<"$CHANGED"; then
 fi
 if grep -q '^systemd/' <<<"$CHANGED"; then
     cp "$REPO"/systemd/*.service "$REPO"/systemd/*.timer /etc/systemd/system/ && systemctl daemon-reload && log "synced unit files + daemon-reload"
-    for t in fr24-watchdog.timer adsb-autoupdate.timer adsb-outbox.timer adsb-ha-mqtt.timer adsb-agenda.timer adsb-daily-report.timer; do
-        systemctl is-enabled "$t" >/dev/null 2>&1 && systemctl restart "$t"
+    # ทุก timer ใน repo: enabled → restart รับ unit ใหม่ · disabled (รวม timer ใหม่) → enable --now ให้เอง
+    # (hands-free deploy — ไม่ต้อง SSH ไปเปิด timer ใหม่). อยากปิดตัวไหนถาวรใช้ `systemctl mask <t>` → ข้าม.
+    for f in "$REPO"/systemd/*.timer; do
+        t="$(basename "$f")"
+        case "$(systemctl is-enabled "$t" 2>/dev/null || true)" in
+            enabled)  systemctl restart "$t" ;;
+            disabled) systemctl enable --now "$t" && log "auto-enabled new timer $t" ;;
+            *)        : ;;   # masked/static/unknown → ข้าม
+        esac
     done
 fi
 

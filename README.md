@@ -76,6 +76,8 @@ sudo systemctl enable --now adsb-autoupdate.timer
 - ดึง `origin/main` แบบ `merge --ff-only` (ปลอดภัย — ถ้า repo มี local edit ที่ชนกัน จะ**ข้าม**ไม่ทับ แล้ว log เตือน).
 - sync `watchdog` → `/usr/local/bin`, unit files → `/etc/systemd/system` (+ `daemon-reload`) ให้เอง.
 - restart เฉพาะ service ที่ไฟล์เปลี่ยนจริง (`flight-watcher` / `pixoo` / `fr24-watchdog`).
+- **timer ใหม่ที่เพิ่มเข้ามา = enable ให้เองอัตโนมัติ** (hands-free — ไม่ต้อง SSH ไป `enable`); ตัวที่ enable
+  แล้วก็ restart รับ unit ใหม่. อยากปิด timer ไหนถาวร (ไม่ให้ auto-enable ซ้ำ) ใช้ `sudo systemctl mask <timer>`.
 - ดู log: `journalctl -u adsb-autoupdate -f` · หยุดชั่วคราว: `sudo systemctl disable --now adsb-autoupdate.timer`
 - สคริปต์ self-update ตัวเองด้วย (แก้ `deploy/adsb-autoupdate.sh` แล้ว merge → รอบถัดไปใช้ตัวใหม่).
 
