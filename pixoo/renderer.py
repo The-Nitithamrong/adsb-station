@@ -169,6 +169,31 @@ def draw_status_frame(d, health):
     d.rectangle([(1, 27), (62, 62)], outline=dim)
 
 
+def _perimeter_points(x0=1, y0=27, x1=62, y1=62):
+    """พิกัดขอบกรอบสถานะเรียงตามเข็มนาฬิกา (บน→ขวา→ล่าง→ซ้าย) สำหรับ scanner วิ่งรอบ"""
+    pts = []
+    pts += [(x, y0) for x in range(x0, x1)]          # บน ซ้าย→ขวา
+    pts += [(x1, y) for y in range(y0, y1)]          # ขวา บน→ล่าง
+    pts += [(x, y1) for x in range(x1, x0, -1)]      # ล่าง ขวา→ซ้าย
+    pts += [(x0, y) for y in range(y1, y0, -1)]      # ซ้าย ล่าง→บน
+    return pts
+
+
+_PERIM = _perimeter_points()
+SCAN_SPEED = 4        # พิกเซล/เฟรม (ต่อ 1 push) — วิ่งรอบกรอบ ~ ยาวรอบ/(SPEED*FPS) วินาที
+SCAN_TAIL = 6         # ความยาวหางดาวหาง (จางลงเรื่อยๆ)
+
+
+def draw_scanner(d, phase, color):
+    """ดาวหางวิ่งรอบขอบกรอบ (เห็นทุกหน้า, ไม่ทับเนื้อหา) — หัวสว่างสุด หางจาง. phase = เลขเฟรมสะสม."""
+    n = len(_PERIM)
+    head = (phase * SCAN_SPEED) % n
+    for i in range(SCAN_TAIL):
+        x, y = _PERIM[(head - i) % n]
+        f = (SCAN_TAIL - i) / SCAN_TAIL
+        d.point((x, y), fill=tuple(int(v * f) for v in color))
+
+
 def draw_plane(d, x, y, color):
     """เครื่องบินพิกเซล 7x7 วาดเอง"""
     for dx, dy in [(3,0),(3,1),(0,3),(1,3),(2,3),(3,3),(4,3),(5,3),(6,3),

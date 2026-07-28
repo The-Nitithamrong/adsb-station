@@ -16,8 +16,9 @@ STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี�
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 AGENDA_STALE_SEC = 6 * 3600   # agenda เก่ากว่านี้ (fetch ตายไปนาน) = ไม่โชว์
 FAN_STALE_SEC = 5 * 60        # fan.json เก่ากว่านี้ (bridge ตาย) = ไม่รู้สถานะ
-REFRESH    = 10               # วินาที/เฟรม (โชว์แค่ HH:MM ไม่ต้องถี่)
-PAGE_HOLD  = 8                # กี่รอบต่อ 1 หน้า (ตอนมีหน้าเดียวไม่มีผล)
+REFRESH    = 10               # วินาที/รอบ อ่านข้อมูล /run ใหม่ (การอ่าน/subprocess แพง ไม่ทำถี่)
+ANIM_FPS   = 2                # เฟรม/วินาที สำหรับ animation (scanner) — push ถี่ขึ้นแต่ข้อมูลคงเดิม
+PAGE_HOLD  = 8                # กี่รอบข้อมูลต่อ 1 หน้า (1 รอบ = REFRESH วินาที)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
 ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
 
@@ -120,7 +121,10 @@ def read_fan():
 
 def main():
     pixoo = Pixoo(PIXOO_IP)
-    tick = 0
+    frames_per_refresh = max(1, int(REFRESH * ANIM_FPS))
+    anim_sleep = 1.0 / ANIM_FPS
+    tick = 0        # นับรอบข้อมูล (ใช้เลือกหน้า)
+    phase = 0       # เฟรม animation สะสม (ใช้ขยับ scanner)
     while True:
         data = read_status()
         inb = read_inbound()
@@ -137,19 +141,30 @@ def main():
         data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
         data["throttled"] = read_throttled()               # undervoltage / thermal throttle (Pi)
         page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
+        health = data.get("health", "stale")
+        scan_col = R.HEALTH.get(health, R.HEALTH["stale"])
 
-        img, d = R.new_frame()
-        R.draw_header(d, datetime.datetime.now())
-        R.draw_status_frame(d, data.get("health", "stale"))
-        page(d, data)
-
-        if ROTATE:
-            img = img.rotate(ROTATE)     # จอติดกลับหัว → หมุนเฟรมชดเชย
-        pixoo.draw_image(img)     # ปรับตาม API lib ของคุณถ้าต่าง (บางรุ่น draw_image_at_location)
-        pixoo.push()
+        # push หลายเฟรมต่อ 1 รอบข้อมูล — เฉพาะ scanner (+ เวลา) ที่ขยับ, เนื้อหาหน้าคงเดิม
+        for _ in range(frames_per_refresh):
+            img, d = R.new_frame()
+            R.draw_header(d, datetime.datetime.now())
+            R.draw_status_frame(d, health)
+            page(d, data)
+            R.draw_scanner(d, phase, scan_col)             # ส่วนเคลื่อนไหว (ทุกหน้า)
+            if ROTATE:
+                img = img.rotate(ROTATE)                   # จอติดกลับหัว → หมุนชดเชย
+            try:
+                pixoo.draw_image(img)
+                pixoo.push()
+            except Exception as e:
+                # Pixoo หลุด network (เคยเจอ No route to host) → อย่า crash/spin เร็ว
+                print("pixoo push failed:", e)
+                time.sleep(REFRESH)
+                break
+            phase += 1
+            time.sleep(anim_sleep)
 
         tick += 1
-        time.sleep(REFRESH)
 
 
 if __name__ == "__main__":
