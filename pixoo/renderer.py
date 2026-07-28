@@ -156,8 +156,11 @@ def text(d, xy, s, font, color, anchor="la"):
 
 
 def draw_header(d, now):
-    """เวลา (big) + วันที่ (small) + เส้นคั่น"""
-    text(d, (32, 1),  now.strftime("%H:%M"),    "big",   PALETTE["time"], anchor="ma")   # y1..14
+    """เวลา (big) + วันที่ (small) + เส้นคั่น — colon กระพริบ 1 Hz (วินาทีคี่ = ซ่อน)"""
+    t = now.strftime("%H:%M")
+    if now.second % 2:                       # ':' กับ ' ' กว้างเท่ากันในฟอนต์ → ตัวเลขไม่ขยับ
+        t = t.replace(":", " ")
+    text(d, (32, 1),  t,                         "big",   PALETTE["time"], anchor="ma")   # y1..14
     text(d, (32, 16), now.strftime("%a %d %b"), "small", PALETTE["date"], anchor="ma")   # y16..22
     d.line([(3, 25), (60, 25)], fill=PALETTE["divider"])
 
@@ -201,11 +204,14 @@ def draw_plane(d, x, y, color):
         d.point((x + dx, y + dy), fill=color)
 
 
-def draw_fan(d, x, y, color):
-    """พัดลม/ใบพัดพิกเซล 7x7 — 4 ใบพัดรอบดุมกลาง (สีเขียว=หมุน, หรี่=ปิด)"""
-    for dx, dy in [(3,3),                              # ดุมกลาง
-                   (2,0),(3,0),(3,1),                  # ใบบน
-                   (6,2),(6,3),(5,3),                  # ใบขวา
-                   (3,5),(3,6),(4,6),                  # ใบล่าง
-                   (0,3),(0,4),(1,3)]:                 # ใบซ้าย
+# พัดลม 7x7 สองเฟรม — ใบตั้งฉาก (frame 0) ↔ ใบทแยง (frame 1) → สลับ = หมุน
+_FAN_FRAMES = [
+    [(3,3), (2,0),(3,0),(3,1), (6,2),(6,3),(5,3), (3,5),(3,6),(4,6), (0,3),(0,4),(1,3)],  # + (บน/ขวา/ล่าง/ซ้าย)
+    [(3,3), (5,0),(6,0),(6,1), (6,5),(6,6),(5,6), (1,6),(0,6),(0,5), (0,1),(0,0),(1,0)],  # x (มุมทั้ง 4)
+]
+
+
+def draw_fan(d, x, y, color, frame=0):
+    """พัดลม/ใบพัดพิกเซล 7x7 (สีเขียว=หมุน, หรี่=ปิด). frame สลับ = ใบพัดหมุน"""
+    for dx, dy in _FAN_FRAMES[frame % len(_FAN_FRAMES)]:
         d.point((x + dx, y + dy), fill=color)

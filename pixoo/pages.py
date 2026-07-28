@@ -155,10 +155,11 @@ def uptime(d, data):
 
     R.text(d, (4, 28), "UP", "small", R.PALETTE["title"], anchor="la")
 
-    # ไอคอนพัดลมระบายความร้อน (กลางแถวบน) — เขียว=หมุนจริง · หรี่เทา=ปิด · ไม่วาด=ไม่รู้สถานะ
+    # ไอคอนพัดลมระบายความร้อน (กลางแถวบน) — เขียว+หมุนจริงตอนเปิด · หรี่เทานิ่ง=ปิด · ไม่วาด=ไม่รู้
     fan = data.get("fan")
     if fan is not None:
-        R.draw_fan(d, 26, 28, R.HEALTH["ok"] if fan else R.PALETTE["divider"])
+        frame = (data.get("anim", 0) // 2) if fan else 0   # เปิด=สลับเฟรม(หมุน) · ปิด=นิ่ง
+        R.draw_fan(d, 26, 28, R.HEALTH["ok"] if fan else R.PALETTE["divider"], frame=frame)
 
     # อุณหภูมิ CPU มุมขวาบน — สีตามความร้อน (<65 เขียว · <75 เหลือง · ร้อนกว่านั้น แดง)
     t = data.get("temp_c")

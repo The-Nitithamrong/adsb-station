@@ -146,6 +146,7 @@ def main():
 
         # push หลายเฟรมต่อ 1 รอบข้อมูล — เฉพาะ scanner (+ เวลา) ที่ขยับ, เนื้อหาหน้าคงเดิม
         for _ in range(frames_per_refresh):
+            data["anim"] = phase                           # เฟรม animation ให้หน้าใช้ (พัดลมหมุน ฯลฯ)
             img, d = R.new_frame()
             R.draw_header(d, datetime.datetime.now())
             R.draw_status_frame(d, health)
