@@ -63,10 +63,11 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   page), the clock colon blinks 1 Hz (`draw_header` swaps ':'→' ', same glyph width so digits don't shift),
   and the UP-page fan spins when on (`draw_fan(...,frame=)` alternates 2 blade frames). Push wrapped in
   try/except (Pixoo WiFi drops crash-looped before). Tune SCAN_SPEED/SCAN_TAIL in renderer, ANIM_FPS in main.
-  COFFEE BREAK: on each new hour in [`COFFEE_START_H`..`COFFEE_END_H`] (08–20, machine=BKK time) main
-  overrides the rotation with the `coffee_break` page for `COFFEE_SHOW_SEC` and fires the Pixoo buzzer
-  (Divoom `Device/PlayBuzzer` HTTP POST, ~3 short beeps). Hour tracked by a `%Y%m%d%H` slot so it beeps
-  once per hour; init to the startup hour so a restart mid-hour doesn't beep.
+  COFFEE BREAK: every `COFFEE_EVERY_MIN` (30) in [`COFFEE_START_H`:00..`COFFEE_END_H`:00] (07:00–20:00,
+  machine=BKK) main overrides the rotation with the `coffee_break` page for `COFFEE_SHOW_SEC` and fires the
+  Pixoo buzzer (Divoom `Device/PlayBuzzer` HTTP POST, ~3 short beeps). Window checked in minutes-of-day so
+  20:30 doesn't fire. Slot = `%Y%m%d-<minsOfDay//EVERY>` → beeps once per slot; init to the startup slot so
+  a restart mid-slot doesn't beep.
 - `agenda/agenda_fetch.py` (+ `systemd/adsb-agenda.{service,timer}`) — OPTIONAL: fetches the next Google
   Calendar event (next flight) via the calendar's **private iCal (ICS) secret URL** over HTTPS (stdlib
   urllib — NO OAuth, runs anywhere), parses the soonest upcoming VEVENT (skips RRULE/past), extracts
