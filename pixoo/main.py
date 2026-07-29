@@ -1,7 +1,7 @@
 """main.py — loop: อ่าน status.json -> วาด header + หน้าปัจจุบัน -> push ทั้งเฟรม
 รันคู่กับ divoom-sync เดิมได้ (คนละ script) หรือรวมเป็นหน้าใน rotation เดียวก็ได้
 """
-import json, time, datetime, subprocess, urllib.request
+import json, time, datetime, subprocess, threading, urllib.request
 from pixoo import Pixoo
 
 import renderer as R
@@ -25,18 +25,28 @@ COFFEE_START_H = 7            # หน้า coffee break เตือนช่�
 COFFEE_END_H   = 20
 COFFEE_EVERY_MIN = 30         # เตือนทุกกี่นาที (:00 และ :30)
 COFFEE_SHOW_SEC = 30          # โชว์หน้ากาแฟนานเท่าไหร่ต่อครั้ง
-COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",   # ~5 วิ, บี๊บเว้นจังหวะ (300ms on / 700ms off × 5)
-               "PlayTotalTime": 5000, "PlayPulseTime": 300, "PlayOffTime": 700}
+# 1 บี๊บ = คำสั่งที่ยืนยันแล้วว่าดัง (curl → error_code 0 + มีเสียง). PlayTotalTime ยาวๆ (เช่น 5000)
+# เครื่องไม่เล่น → ยิงคำสั่งนี้ซ้ำ COFFEE_BUZZ_REPEAT ครั้ง เว้น COFFEE_BUZZ_GAP วิ = บี๊บเว้นจังหวะ ~5 วิ
+COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",
+               "PlayTotalTime": 1500, "PlayPulseTime": 200, "PlayOffTime": 300}
+COFFEE_BUZZ_REPEAT = 3
+COFFEE_BUZZ_GAP = 1.8          # วิ ระหว่างบี๊บ (>1.5 กันซ้อนกับคำสั่งก่อน; 3 ครั้ง ≈ 5 วิ)
 
 
 def buzz(ip):
-    # สั่ง buzzer บน Pixoo (Divoom API) — เสียงสั้นๆ 2-3 ครั้ง เตือนพักกาแฟ
-    try:
-        req = urllib.request.Request(f"http://{ip}/post", data=json.dumps(COFFEE_BUZZ).encode(),
-                                     headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print("buzz failed:", e)
+    # ยิง buzzer ซ้ำใน thread แยก (ไม่บล็อค render loop) → บี๊บเว้นจังหวะ ~5 วิ
+    def run():
+        body = json.dumps(COFFEE_BUZZ).encode()
+        for i in range(COFFEE_BUZZ_REPEAT):
+            try:
+                req = urllib.request.Request(f"http://{ip}/post", data=body,
+                                             headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                print("buzz failed:", e)
+            if i < COFFEE_BUZZ_REPEAT - 1:
+                time.sleep(COFFEE_BUZZ_GAP)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def read_uptime():
