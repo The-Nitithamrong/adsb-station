@@ -25,8 +25,8 @@ COFFEE_START_H = 7            # หน้า coffee break เตือนช่�
 COFFEE_END_H   = 20
 COFFEE_EVERY_MIN = 30         # เตือนทุกกี่นาที (:00 และ :30)
 COFFEE_SHOW_SEC = 30          # โชว์หน้ากาแฟนานเท่าไหร่ต่อครั้ง
-COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",   # ~3 บี๊บสั้น (200ms on / 300ms off × 3 ใน 1500ms)
-               "PlayTotalTime": 1500, "PlayPulseTime": 200, "PlayOffTime": 300}
+COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",   # ~5 วิ, บี๊บเว้นจังหวะ (300ms on / 700ms off × 5)
+               "PlayTotalTime": 5000, "PlayPulseTime": 300, "PlayOffTime": 700}
 
 
 def buzz(ip):
