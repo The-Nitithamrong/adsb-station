@@ -65,9 +65,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   try/except (Pixoo WiFi drops crash-looped before). Tune SCAN_SPEED/SCAN_TAIL in renderer, ANIM_FPS in main.
   COFFEE BREAK: every `COFFEE_EVERY_MIN` (30) in [`COFFEE_START_H`:00..`COFFEE_END_H`:00] (07:00–20:00,
   machine=BKK) main overrides the rotation with the `coffee_break` page for `COFFEE_SHOW_SEC` and fires the
-  Pixoo buzzer in a daemon thread — `COFFEE_BUZZ` (`Device/PlayBuzzer`, the curl-verified short pattern;
-  long `PlayTotalTime` like 5000 is silent on the device) POSTed `COFFEE_BUZZ_REPEAT`× with `COFFEE_BUZZ_GAP`s
-  between = spaced beeps ~5s (threaded so it doesn't block the render loop). Window checked in minutes-of-day so
+  Pixoo buzzer via `COFFEE_BUZZ` (`Device/PlayBuzzer`) — one fire-and-forget POST; the device loops
+  `ActiveTimeInCycle`/`OffTimeInCycle` for `PlayTotalTime` (500/500/5000 = ~5 spaced beeps in 5s).
+  GOTCHA: the param names are `ActiveTimeInCycle`/`OffTimeInCycle`, NOT `PlayPulseTime`/`PlayOffTime` —
+  wrong names = the device stays silent. Window checked in minutes-of-day so
   20:30 doesn't fire. Slot = `%Y%m%d-<minsOfDay//EVERY>` → beeps once per slot; init to the startup slot so
   a restart mid-slot doesn't beep.
 - `agenda/agenda_fetch.py` (+ `systemd/adsb-agenda.{service,timer}`) — OPTIONAL: fetches the next Google
