@@ -21,8 +21,9 @@ ANIM_FPS   = 2                # เฟรม/วินาที สำหรั�
 PAGE_HOLD  = 8                # กี่รอบข้อมูลต่อ 1 หน้า (1 รอบ = REFRESH วินาที)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
 ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
-COFFEE_START_H = 8            # หน้า coffee break เตือนตรงชั่วโมง ช่วง [START..END] (เวลาเครื่อง = BKK)
+COFFEE_START_H = 7            # หน้า coffee break เตือนช่วง [START:00..END:00] (เวลาเครื่อง = BKK)
 COFFEE_END_H   = 20
+COFFEE_EVERY_MIN = 30         # เตือนทุกกี่นาที (:00 และ :30)
 COFFEE_SHOW_SEC = 30          # โชว์หน้ากาแฟนานเท่าไหร่ต่อครั้ง
 COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",   # ~3 บี๊บสั้น (200ms on / 300ms off × 3 ใน 1500ms)
                "PlayTotalTime": 1500, "PlayPulseTime": 200, "PlayOffTime": 300}
@@ -140,7 +141,8 @@ def main():
     anim_sleep = 1.0 / ANIM_FPS
     tick = 0        # นับรอบข้อมูล (ใช้เลือกหน้า)
     phase = 0       # เฟรม animation สะสม (ใช้ขยับ scanner)
-    last_slot = datetime.datetime.now().strftime("%Y%m%d%H")   # ชั่วโมงล่าสุด (กัน beep ซ้ำ; init = ตอนเริ่ม)
+    _n = datetime.datetime.now()                               # init slot ทุก 30 นาที (กัน beep ซ้ำ/ตอน restart)
+    last_slot = f"{_n:%Y%m%d}-{(_n.hour * 60 + _n.minute) // COFFEE_EVERY_MIN}"
     coffee_until = 0.0                                          # โชว์หน้ากาแฟจนถึง ts นี้
     while True:
         data = read_status()
@@ -158,11 +160,12 @@ def main():
         data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
         data["throttled"] = read_throttled()               # undervoltage / thermal throttle (Pi)
 
-        # coffee break: ตรงชั่วโมงใหม่ ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ ~30 วิ
+        # coffee break: ทุก 30 นาที (:00/:30) ช่วง 07:00–20:00 → beep + โชว์หน้ากาแฟ ~30 วิ
         now_dt = datetime.datetime.now()
-        slot = now_dt.strftime("%Y%m%d%H")
+        mins = now_dt.hour * 60 + now_dt.minute
+        slot = f"{now_dt:%Y%m%d}-{mins // COFFEE_EVERY_MIN}"
         if slot != last_slot:
-            if COFFEE_START_H <= now_dt.hour <= COFFEE_END_H:
+            if COFFEE_START_H * 60 <= mins <= COFFEE_END_H * 60:
                 coffee_until = time.time() + COFFEE_SHOW_SEC
                 buzz(PIXOO_IP)
             last_slot = slot
