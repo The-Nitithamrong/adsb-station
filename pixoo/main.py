@@ -1,7 +1,8 @@
 """main.py — loop: อ่าน status.json -> วาด header + หน้าปัจจุบัน -> push ทั้งเฟรม
 รันคู่กับ divoom-sync เดิมได้ (คนละ script) หรือรวมเป็นหน้าใน rotation เดียวก็ได้
 """
-import json, time, datetime, subprocess, urllib.request
+import json, time, datetime, subprocess, urllib.request, socket
+import requests
 from pixoo import Pixoo
 
 import renderer as R
@@ -18,6 +19,8 @@ AGENDA_STALE_SEC = 6 * 3600   # agenda เก่ากว่านี้ (fetch 
 FAN_STALE_SEC = 5 * 60        # fan.json เก่ากว่านี้ (bridge ตาย) = ไม่รู้สถานะ
 REFRESH    = 10               # วินาที/รอบ อ่านข้อมูล /run ใหม่ (การอ่าน/subprocess แพง ไม่ทำถี่)
 ANIM_FPS   = 2                # เฟรม/วินาที สำหรับ animation (scanner) — push ถี่ขึ้นแต่ข้อมูลคงเดิม
+PUSH_TIMEOUT = 5              # วินาที — timeout ทุก HTTP ไป Pixoo (กัน push ค้างตอน WiFi หลุด → block ตลอดกาล)
+PUSH_FAIL_RECONNECT = 3       # push fail ติดกันกี่ครั้ง → สร้าง Pixoo() ใหม่ (reconnect + reset frame counter)
 PAGE_HOLD  = 8                # กี่รอบข้อมูลต่อ 1 หน้า (1 รอบ = REFRESH วินาที)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
 ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
@@ -31,6 +34,18 @@ KNOCKOFF_SHOW_SEC = 60        # โชว์หน้าเลิกงานน
 # on 500ms / off 500ms วนจน PlayTotalTime=5000 → บี๊บเว้นจังหวะ ~5 บี๊บ ใน 5 วิ. (POST เดียว, เครื่องเล่นเอง)
 COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",
                "ActiveTimeInCycle": 500, "OffTimeInCycle": 500, "PlayTotalTime": 5000}
+
+
+# --- robustness: pixoo lib เรียก requests แบบไม่ตั้ง timeout → WiFi/router สะดุดกลาง push = block ตลอดกาล
+#     (จอค้างเฟรมเดิม, service ยัง active แต่ loop ตายอยู่ที่ socket — ไม่ throw, except เดิมเลยไม่ทำงาน).
+#     ยัด default timeout ให้ requests ทุกตัว (patch Session.request ครอบทั้ง requests.post/session) →
+#     push ค้างจะ raise Timeout หลัง PUSH_TIMEOUT → except จับได้ → retry/reconnect. + socket default กันเผื่อ.
+socket.setdefaulttimeout(PUSH_TIMEOUT)
+_orig_request = requests.Session.request
+def _request_with_timeout(self, *a, **kw):
+    kw.setdefault("timeout", PUSH_TIMEOUT)
+    return _orig_request(self, *a, **kw)
+requests.Session.request = _request_with_timeout
 
 
 def buzz(ip):
@@ -143,6 +158,7 @@ def main():
     pixoo = Pixoo(PIXOO_IP)
     frames_per_refresh = max(1, int(REFRESH * ANIM_FPS))
     anim_sleep = 1.0 / ANIM_FPS
+    fails = 0       # นับ push fail ติดกัน → ถึง PUSH_FAIL_RECONNECT แล้วสร้าง Pixoo() ใหม่
     tick = 0        # นับรอบข้อมูล (ใช้เลือกหน้า)
     phase = 0       # เฟรม animation สะสม (ใช้ขยับ scanner)
     _n = datetime.datetime.now()                               # init slot ทุก 30 นาที (กัน beep ซ้ำ/ตอน restart)
@@ -209,9 +225,18 @@ def main():
             try:
                 pixoo.draw_image(img)
                 pixoo.push()
+                fails = 0
             except Exception as e:
-                # Pixoo หลุด network (เคยเจอ No route to host) → อย่า crash/spin เร็ว
-                print("pixoo push failed:", e)
+                # Pixoo หลุด network (WiFi/router สะดุด, No route to host, timeout) → อย่า crash/spin เร็ว
+                fails += 1
+                print(f"pixoo push failed ({fails}):", e)
+                if fails >= PUSH_FAIL_RECONNECT:
+                    try:
+                        pixoo = Pixoo(PIXOO_IP)   # สร้างใหม่ = reconnect + reset frame counter (กัน counter desync)
+                        fails = 0
+                        print("pixoo reconnected")
+                    except Exception as e2:
+                        print("pixoo reconnect failed:", e2)   # ยังหลุดอยู่ — รอบหน้าค่อยลองใหม่
                 time.sleep(REFRESH)
                 break
             phase += 1
