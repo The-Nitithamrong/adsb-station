@@ -118,6 +118,42 @@ sudo systemctl start adsb-outbox     # ส่งรอบแรกเลย · �
 ```
 (อยู่ในโฟลเดอร์ `systemd/` → auto-update จัดการ restart timer ให้เองเมื่อแก้ในอนาคต)
 
+## Heartbeat "กล่องดำ" → Cloudflare D1 (optional — จับสาเหตุ Pi ค้างเงียบ)
+
+`report/heartbeat.py` ยิง snapshot สุขภาพ Pi ขึ้น D1 ทุก ~10 นาที (ใช้ creds D1 ชุดเดียวกับ outbox).
+Pi เคยค้างแบบ **kernel freeze (ไฟเขียวค้าง)** แล้ว journal ในเครื่องหาย → ไม่รู้สาเหตุ. cloud รอด hang →
+**row สุดท้ายก่อน "เงียบ" = สภาพตอนใกล้ค้าง**. เก็บ `throttled` (raw hex รวม sticky bits), `volts_core`,
+`temp_c`, `freq_arm_mhz`, `load1/5/15`, `mem_avail_mb`, `uptime_s`, feeder rate/aircraft/health.
+เขียน backup ในเครื่อง `/home/arin/heartbeat.jsonl` ด้วย. ต้องมี D1 (ดูหัวข้อ Outbox ด้านบน) ก่อน.
+
+**1. สร้างตาราง `heartbeat` ใน D1** (dashboard console หรือ `wrangler d1 execute`):
+```sql
+CREATE TABLE IF NOT EXISTS heartbeat (
+  uid TEXT PRIMARY KEY, station TEXT, ts INTEGER, uptime_s INTEGER,
+  temp_c REAL, throttled INTEGER, volts_core REAL, freq_arm_mhz INTEGER,
+  load1 REAL, load5 REAL, load15 REAL, mem_avail_mb INTEGER, disk_used_pct INTEGER,
+  msg_per_s REAL, aircraft INTEGER, health TEXT);
+CREATE INDEX IF NOT EXISTS idx_hb_station_ts ON heartbeat(station, ts);
+```
+
+**2. ติดตั้ง** (creds D1 ใน `/etc/fr24-watchdog.env` มีอยู่แล้วจาก Outbox):
+```bash
+sudo cp ~/adsb-station/systemd/adsb-heartbeat.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now adsb-heartbeat.timer
+sudo systemctl start adsb-heartbeat   # ส่งรอบแรก · ดู: journalctl -u adsb-heartbeat -n 20
+```
+(หรือแค่ `git pull` — auto-update จะ copy unit + `enable --now` timer ใหม่ให้เอง)
+
+**อ่านย้อนหลังตอนสงสัยว่าค้าง** (dashboard SQL / `wrangler d1 execute`):
+```sql
+SELECT datetime(ts,'unixepoch','+7 hours') t, uptime_s, temp_c, printf('0x%x',throttled) thr,
+       volts_core, freq_arm_mhz, load1, health
+FROM heartbeat WHERE station='<STATION_ID>' ORDER BY ts DESC LIMIT 30;
+```
+มองหา gap เวลา (= ช่วงค้าง) แล้วดูแถวก่อน gap: temp พุ่ง=ความร้อน · `thr`≠0x0/`volts` ตก=ไฟ ·
+`load1` พุ่ง=CPU spike (cron.daily) · ทุกค่าปกติแล้วเงียบ=hard brownout. `uptime_s` ลดหลัง gap=รีบูต (ค้างจริง).
+
 ## Home Assistant + MQTT (optional — ข้อมูล ADS-B เป็น sensor ใน HA)
 
 รัน HA + Mosquitto เป็น Docker container บน Pi (อยู่ร่วมกับ ADS-B) แล้วสถานี publish สถานะเข้า MQTT

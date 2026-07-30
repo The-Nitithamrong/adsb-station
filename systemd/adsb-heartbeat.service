@@ -1,0 +1,9 @@
+[Unit]
+Description=ADS-B Pi health heartbeat (black box) -> Cloudflare D1
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=arin
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/report/heartbeat.py
