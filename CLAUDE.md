@@ -49,6 +49,18 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `report/fan_stats.py` — per-day fan on-count + total on-time from `/home/arin/fan_events.jsonl`
   (append-only `{ts,on}` log written by mqtt_publish on every switch on↔off transition, ~1-min res).
   `python3 fan_stats.py [days]`; `today_stats()` is imported by daily_status for the digest line.
+- `report/heartbeat.py` (+ `systemd/adsb-heartbeat.{service,timer}`) — "black box" recorder for the
+  silent-hang problem. Every ~10 min pushes ONE health snapshot to Cloudflare D1 table `heartbeat`
+  (reuses outbox's D1 pattern; `uid`=station:ts + `INSERT OR IGNORE` = idempotent) AND appends to local
+  `/home/arin/heartbeat.jsonl` backup. Snapshot = `throttled` (RAW hex — keeps sticky "occurred" bits
+  0x1_0000+ so a brief undervoltage between ticks is caught), `volts_core`, `temp_c`, `freq_arm_mhz`,
+  `load1/5/15`, `mem_avail_mb`, `disk_used_pct`, `uptime_s`, feeder `msg_per_s/aircraft/health`.
+  WHY: journald keeps getting wiped by the freeze (green-LED-stuck kernel hang) — cloud survives it, so
+  the LAST row before the silence gap = the pre-hang state. Reboot shows as `uptime_s` dropping (that
+  also separates a real hang from a mere network drop — a net drop leaves `uptime_s` climbing). Hang
+  reproduced on BOTH SD and NVMe → storage/USB ruled out; remaining suspects power/kernel/thermal, which
+  these fields pin down. CREATE the D1 table once before use (`HEARTBEAT_SCHEMA` at file end / README).
+  D1 creds + `STATION_ID` reuse the same /etc/fr24-watchdog.env keys as outbox.
 - `flightwatch/outbox.py` (+ `systemd/adsb-outbox.{service,timer}`) — OPTIONAL forwarder: sends new
   `events`+`tracks` rows to a cloud sink (Cloudflare D1 now) every ~10 min. Adds a `sent` column to
   each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows queue
@@ -151,7 +163,26 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
      SD I/O stall) kills it too, so it can't recover the dongle. A dongle that looks "dead" (warm + no
      data) may actually be the whole Pi hung, NOT the dongle — the original "21-hour silent failure" could
      have been this. Hardware watchdog resets the Pi on kernel/systemd hang; software watchdog can't.
-   - Observed: spontaneous full hang ~04:00 correlating with `cron.daily` (man-db/apt I/O spike on SD) —
-     with an official 27W PSU (undervoltage ruled out), suspect SD I/O stall. journald was NOT persistent
-     (lost the crash logs) — re-enabled via `/var/log/journal`. `Power/throttle` sensor + persistent
-     journal now capture undervoltage/thermal for the next event.
+   - Observed: spontaneous full hangs (green ACT LED stuck solid, fan spinning, only power-cycle recovers).
+     One correlated ~04:00 with `cron.daily` (man-db/apt CPU+I/O spike). UPDATE: the hang reproduced on
+     BOTH SD and NVMe → **storage/USB ruled out** (NVMe is PCIe, not USB); remaining suspects are
+     **power (brownout under load spike) / kernel / thermal**. The `cron.daily` correlation now reads as a
+     CPU-load spike (→ power draw spike) trigger, not an SD-write spike. `vcgencmd get_throttled`="ok" does
+     NOT clear power — a hard brownout freezes before it can log, and sticky bits reset on power-cycle.
+   - journald persistence kept getting lost across hangs (dir existed since Jun but journald ran volatile
+     until a restart). Now forced `Storage=persistent` so the NEXT hang's `journalctl -b -1` is captured.
+   - FR24 feed history pinned one outage start at **20:05 UTC = 03:05 BKK** — the same early-morning window.
+     PRIME network-side suspect: a **scheduled Xiaomi mesh reboot / firmware auto-update ~03:00–04:00 BKK**.
+     A router reboot mid-night → WiFi drops → fr24feed upload breaks + Pixoo push fails, and the Pi's
+     onboard WiFi (brcmfmac) often fails to re-associate after the AP vanishes → looks like a dead Pi.
+     ACTION: check the router's 定时重启 (scheduled restart) + auto-update and disable / move off-hours.
+     This may be SEPARATE from the true kernel freeze (green-LED-stuck) — heartbeat's `uptime_s` + local
+     jsonl distinguish them: a network-only drop keeps `uptime_s` climbing and keeps writing local rows;
+     a real hang resets `uptime_s` and leaves a local-jsonl gap too. Longer-term for WiFi: wire Ethernet,
+     or `iw wlan0 set power_save off`.
+   - ✅ black box — `report/heartbeat.py` pushes a health snapshot to Cloudflare D1 every ~10 min so the
+     pre-hang state survives the freeze (journald doesn't). Diagnose a hang by reading the last few D1 rows
+     before the silence gap: temp climbing → thermal; `throttled` bit / `volts_core` dip → power; `load`
+     spike → cron/CPU trigger; all-normal-then-silent → hard brownout. Reproduce without waiting: load all
+     cores (`stress-ng --cpu 4`) while watching throttle/temp. Also try firmware/EEPROM update
+     (`apt full-upgrade` + `rpi-eeprom-update -a`) for known Pi 5 hang fixes, and a known-good 5V/5A PSU+cable.
