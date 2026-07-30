@@ -69,7 +69,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `uptime`,
-  `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotated 180° (upside-down mount).
+  `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotation via `ROTATE` in main
+  (0 = normal mount; 180 = upside-down mount — flip if the display reads inverted).
   ANIMATION: main loop reads /run data every `REFRESH`s but pushes `ANIM_FPS` frames/s (default 2) and
   sets `data["anim"]=phase` per frame. Moving bits: `draw_scanner()` comet around the frame border (every
   page), the clock colon blinks 1 Hz (`draw_header` swaps ':'→' ', same glyph width so digits don't shift),

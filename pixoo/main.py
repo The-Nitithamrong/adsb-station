@@ -23,7 +23,7 @@ PUSH_TIMEOUT = 5              # วินาที — timeout ทุก HTTP �
 PUSH_FAIL_RECONNECT = 3       # push fail ติดกันกี่ครั้ง → สร้าง Pixoo() ใหม่ (reconnect + reset frame counter)
 PAGE_HOLD  = 8                # กี่รอบข้อมูลต่อ 1 หน้า (1 รอบ = REFRESH วินาที)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
-ROTATE     = 180              # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
+ROTATE     = 0                # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
 COFFEE_START_H = 7            # หน้า coffee break เตือนช่วง [START:00..END:00] (เวลาเครื่อง = BKK)
 COFFEE_END_H   = 20
 COFFEE_EVERY_MIN = 30         # เตือนทุกกี่นาที (:00 และ :30)
