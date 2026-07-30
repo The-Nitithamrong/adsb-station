@@ -5,7 +5,7 @@ import json, time, datetime, subprocess, urllib.request
 from pixoo import Pixoo
 
 import renderer as R
-from pages import PAGES, coffee_break
+from pages import PAGES, coffee_break, knock_off
 
 PIXOO_IP   = "192.168.41.143"
 STATUS_F   = "/run/fr24-watchdog/status.json"
@@ -25,6 +25,8 @@ COFFEE_START_H = 7            # หน้า coffee break เตือนช่�
 COFFEE_END_H   = 20
 COFFEE_EVERY_MIN = 30         # เตือนทุกกี่นาที (:00 และ :30)
 COFFEE_SHOW_SEC = 30          # โชว์หน้ากาแฟนานเท่าไหร่ต่อครั้ง
+KNOCKOFF_H = 22               # เตือน "เลิกงาน" 22:00 (4 ทุ่ม) — ครั้งเดียว/วัน (เวลาเครื่อง = BKK)
+KNOCKOFF_SHOW_SEC = 60        # โชว์หน้าเลิกงานนานเท่าไหร่ (นานกว่า coffee — เตือนสำคัญ)
 # Divoom PlayBuzzer ใช้ ActiveTimeInCycle/OffTimeInCycle (ไม่ใช่ PlayPulseTime/PlayOffTime — ชื่อผิด=เงียบ).
 # on 500ms / off 500ms วนจน PlayTotalTime=5000 → บี๊บเว้นจังหวะ ~5 บี๊บ ใน 5 วิ. (POST เดียว, เครื่องเล่นเอง)
 COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",
@@ -146,6 +148,10 @@ def main():
     _n = datetime.datetime.now()                               # init slot ทุก 30 นาที (กัน beep ซ้ำ/ตอน restart)
     last_slot = f"{_n:%Y%m%d}-{(_n.hour * 60 + _n.minute) // COFFEE_EVERY_MIN}"
     coffee_until = 0.0                                          # โชว์หน้ากาแฟจนถึง ts นี้
+    knockoff_until = 0.0                                        # โชว์หน้าเลิกงานจนถึง ts นี้
+    knockoff_min = KNOCKOFF_H * 60                             # 22:00 เป็นนาทีของวัน
+    # init: ถ้าเริ่มมาหลัง 22:00 แล้ว = ถือว่าเตือนไปแล้ววันนี้ (กัน restart ดึกๆ แล้วเด้งซ้ำ)
+    last_knockoff_day = f"{_n:%Y%m%d}" if (_n.hour * 60 + _n.minute) >= knockoff_min else ""
     while True:
         data = read_status()
         inb = read_inbound()
@@ -171,7 +177,22 @@ def main():
                 coffee_until = time.time() + COFFEE_SHOW_SEC
                 buzz(PIXOO_IP)
             last_slot = slot
-        page = coffee_break if time.time() < coffee_until else PAGES[(tick // PAGE_HOLD) % len(PAGES)]
+
+        # เลิกงาน: ครั้งเดียว/วัน เมื่อนาฬิกาถึง 22:00 → beep + โชว์หน้าเลิกงาน
+        today = f"{now_dt:%Y%m%d}"
+        if today != last_knockoff_day and mins >= knockoff_min:
+            knockoff_until = time.time() + KNOCKOFF_SHOW_SEC
+            buzz(PIXOO_IP)
+            last_knockoff_day = today
+
+        # ลำดับความสำคัญ: เลิกงาน > coffee > รอบหมุนปกติ
+        now_t = time.time()
+        if now_t < knockoff_until:
+            page = knock_off
+        elif now_t < coffee_until:
+            page = coffee_break
+        else:
+            page = PAGES[(tick // PAGE_HOLD) % len(PAGES)]
         health = data.get("health", "stale")
         scan_col = R.HEALTH.get(health, R.HEALTH["stale"])
 
