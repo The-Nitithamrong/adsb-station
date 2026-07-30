@@ -83,6 +83,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   wrong names = the device stays silent. Window checked in minutes-of-day so
   20:30 doesn't fire. Slot = `%Y%m%d-<minsOfDay//EVERY>` → beeps once per slot; init to the startup slot so
   a restart mid-slot doesn't beep.
+  KNOCK-OFF: at `KNOCKOFF_H`:00 (22:00 BKK) main shows the `knock_off` page (crescent moon + twinkling
+  stars, "GO HOME") for `KNOCKOFF_SHOW_SEC` and buzzes ONCE — a daily "stop work" reminder. Fires once/day
+  (dedup by `%Y%m%d` when minsOfDay ≥ 22:00; `last_knockoff_day` inits to today if started after 22:00 so a
+  late restart doesn't re-fire). Page priority in the loop: knock_off > coffee_break > normal rotation.
 - `agenda/agenda_fetch.py` (+ `systemd/adsb-agenda.{service,timer}`) — OPTIONAL: fetches the next Google
   Calendar event (next flight) via the calendar's **private iCal (ICS) secret URL** over HTTPS (stdlib
   urllib — NO OAuth, runs anywhere), parses the soonest upcoming VEVENT (skips RRULE/past), extracts

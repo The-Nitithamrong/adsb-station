@@ -204,6 +204,28 @@ def coffee_break(d, data):
     R.text(d, (32, 59), "COFFEE TIME", "tiny", R.PALETTE["label"], anchor="mm")
 
 
+def knock_off(d, data):
+    """หน้าเตือนเลิกงาน 22:00 (โผล่ครั้งเดียว/วัน ไม่อยู่ในรอบหมุน) — พระจันทร์เสี้ยว + ดาวกระพริบ"""
+    moon = (235, 225, 150)
+    R.text(d, (4, 28), "OFF", "small", R.PALETTE["title"], anchor="la")
+
+    # พระจันทร์เสี้ยว: วาดวงเต็มแล้วเจาะด้วยสี bg เยื้องขึ้น-ขวา → เหลือเสี้ยวซ้ายล่าง
+    d.ellipse([(25, 38), (37, 50)], fill=moon)
+    d.ellipse([(28, 36), (41, 49)], fill=R.PALETTE["bg"])
+
+    # ดาวกระพริบรอบๆ — สว่าง=กากบาทเล็ก · หรี่=จุดเดียว (สลับตาม anim)
+    a = data.get("anim", 0)
+    for i, (sx, sy) in enumerate(((14, 34), (49, 36), (45, 51), (17, 53), (52, 45))):
+        if (a + i) % 2:
+            col = (245, 240, 200)
+            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+                d.point((sx + dx, sy + dy), fill=col)
+        else:
+            d.point((sx, sy), fill=(90, 92, 110))
+
+    R.text(d, (32, 59), "GO HOME", "tiny", R.PALETTE["label"], anchor="mm")
+
+
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
 # (tha_inbound / flights_list เก็บฟังก์ชันไว้ ใส่กลับใน list ได้ทุกเมื่อ)
 PAGES = [feeder_status, uptime, next_flight]
