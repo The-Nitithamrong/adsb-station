@@ -205,9 +205,9 @@ def coffee_break(d, data):
 
 
 def knock_off(d, data):
-    """หน้าเตือนเลิกงาน 22:00 (โผล่ครั้งเดียว/วัน ไม่อยู่ในรอบหมุน) — พระจันทร์เสี้ยว + ดาวกระพริบ"""
+    """หน้าเตือนเข้านอน 22:00 (โผล่ครั้งเดียว/วัน ไม่อยู่ในรอบหมุน) — พระจันทร์เสี้ยว + ดาวกระพริบ"""
     moon = (235, 225, 150)
-    R.text(d, (4, 28), "OFF", "small", R.PALETTE["title"], anchor="la")
+    R.text(d, (4, 28), "BED", "small", R.PALETTE["title"], anchor="la")
 
     # พระจันทร์เสี้ยว: วาดวงเต็มแล้วเจาะด้วยสี bg เยื้องขึ้น-ขวา → เหลือเสี้ยวซ้ายล่าง
     d.ellipse([(25, 38), (37, 50)], fill=moon)
@@ -223,7 +223,7 @@ def knock_off(d, data):
         else:
             d.point((sx, sy), fill=(90, 92, 110))
 
-    R.text(d, (32, 59), "GO HOME", "tiny", R.PALETTE["label"], anchor="mm")
+    R.text(d, (32, 59), "TIME TO BED", "tiny", R.PALETTE["label"], anchor="mm")
 
 
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
