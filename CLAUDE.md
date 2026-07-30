@@ -75,6 +75,12 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   page), the clock colon blinks 1 Hz (`draw_header` swaps ':'→' ', same glyph width so digits don't shift),
   and the UP-page fan spins when on (`draw_fan(...,frame=)` alternates 2 blade frames). Push wrapped in
   try/except (Pixoo WiFi drops crash-looped before). Tune SCAN_SPEED/SCAN_TAIL in renderer, ANIM_FPS in main.
+  PUSH HANG (fixed): the `pixoo` lib calls `requests` with NO timeout — a WiFi/router blip mid-push left the
+  socket half-open and the loop BLOCKED FOREVER (display froze, `pixoo.service` still "active" but ~0 CPU, no
+  log, no exception → the try/except never fired). Fix: main monkeypatches `requests.Session.request` to
+  inject `timeout=PUSH_TIMEOUT` (+ `socket.setdefaulttimeout`) so a hung push RAISES → caught → after
+  `PUSH_FAIL_RECONNECT` consecutive fails it re-creates `Pixoo()` (reconnect + reset frame counter). Now the
+  display self-heals after any network blip instead of needing a manual `systemctl restart pixoo`.
   COFFEE BREAK: every `COFFEE_EVERY_MIN` (30) in [`COFFEE_START_H`:00..`COFFEE_END_H`:00] (07:00–20:00,
   machine=BKK) main overrides the rotation with the `coffee_break` page for `COFFEE_SHOW_SEC` and fires the
   Pixoo buzzer via `COFFEE_BUZZ` (`Device/PlayBuzzer`) — one fire-and-forget POST; the device loops
