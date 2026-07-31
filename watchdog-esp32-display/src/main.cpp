@@ -56,15 +56,17 @@ unsigned long lastReset = 0;   // millis ตอน power-cycle รอบล่�
 bool forceUI = true, dWifi = false, dPiUp = false;
 char dLine[64] = {0}, dLine2[64] = {0};   // dLine = บรรทัด reset, dLine2 = บรรทัด sync
 
-// NTP sync — SNTP callback เซ็ตค่าเมื่อ sync เวลาสำเร็จ (volatile: เขียนจาก callback)
+// NTP sync — SNTP callback เก็บ "เวลาจริง" ที่ sync สำเร็จ (แสดงเป็นวันเวลานิ่งๆ ไม่วิ่ง/ไม่กระพริบ)
 volatile bool everSync = false;
-volatile unsigned long lastSync = 0;
-void onTimeSync(struct timeval*) { lastSync = millis(); everSync = true; }
+volatile time_t syncEpoch = 0;
+void onTimeSync(struct timeval* tv) { syncEpoch = tv->tv_sec; everSync = true; }
 
-// "1m05s ago" ถ้า <1 ชม. ไม่งั้น "2h13m ago" — ใส่แค่ตัวเลข (คำว่า ago เติมตอนเรียก)
-void fmtAgo(char* b, size_t n, unsigned long s) {
-  if (s < 3600) snprintf(b, n, "%lum%02lus", s / 60, s % 60);
-  else          snprintf(b, n, "%luh%02lum", s / 3600, (s % 3600) / 60);
+// รูปแบบเดียวกับ Pixoo (_fmt2): 2 หน่วยบนสุด ไม่มีวินาที เช่น "3D 14H" / "14H 22M" / "22M"
+void fmtUp(char* b, size_t n, unsigned long s) {
+  unsigned long d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60;
+  if (d)      snprintf(b, n, "%luD %luH", d, h);
+  else if (h) snprintf(b, n, "%luH %luM", h, m);
+  else        snprintf(b, n, "%luM", m);
 }
 
 // ---------- WiFi ----------
@@ -131,9 +133,9 @@ void drawDynamic() {  // วาดใหม่เฉพาะส่วนที�
   // ไม่เหมือน last ok เดิมที่รีทุก 30 วิ). ยังไม่เคยตัด → "up ... no reset yet". Pi ดับ → นับถอยหลัง
   char line[64], num[16];
   if (piUp) {
-    if (everReset) { fmtAgo(num, sizeof(num), (millis() - lastReset) / 1000);
+    if (everReset) { fmtUp(num, sizeof(num), (millis() - lastReset) / 1000);
                      snprintf(line, sizeof(line), "last reset %s ago", num); }
-    else           { fmtAgo(num, sizeof(num), millis() / 1000);
+    else           { fmtUp(num, sizeof(num), millis() / 1000);
                      snprintf(line, sizeof(line), "up %s  no reset yet", num); }
   } else {
     unsigned long ago = (millis() - lastPiOk) / 1000;
@@ -148,10 +150,11 @@ void drawDynamic() {  // วาดใหม่เฉพาะส่วนที�
     strncpy(dLine, line, sizeof(dLine) - 1);
   }
 
-  // บรรทัด 2 — sync: เวลาตั้งแต่ NTP sync สำเร็จล่าสุด (นาฬิกา ESP32 สด/ค้าง). ยังไม่ sync → รอ NTP
-  char line2[64], num2[16];
-  if (everSync) { fmtAgo(num2, sizeof(num2), (millis() - lastSync) / 1000);
-                  snprintf(line2, sizeof(line2), "last sync %s ago", num2); }
+  // บรรทัด 2 — sync: "วันเวลาจริง" ที่ NTP sync ล่าสุด (นิ่ง ไม่วิ่ง/กระพริบ — เปลี่ยนตอน re-sync ~ราย ชม.)
+  char line2[64];
+  if (everSync) { struct tm t; time_t e = syncEpoch; localtime_r(&e, &t);
+                  char ts[24]; strftime(ts, sizeof(ts), "%d/%m %H:%M", &t);
+                  snprintf(line2, sizeof(line2), "last sync %s", ts); }
   else          snprintf(line2, sizeof(line2), "sync: waiting NTP...");
   if (forceUI || strcmp(line2, dLine2) != 0) {
     tft.fillRect(0, 132, SCREEN_W, 15, TFT_BLACK);
