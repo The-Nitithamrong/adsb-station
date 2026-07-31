@@ -2,6 +2,8 @@
 # adsb-autoupdate.sh — ให้ Pi ดึง origin/main เองอัตโนมัติ (systemd timer, root)
 # แล้ว sync ไฟล์ที่ git pull ไม่อัปเดตให้ (watchdog → /usr/local/bin, unit → /etc/systemd/system)
 # + restart เฉพาะ service ที่ไฟล์เปลี่ยนจริง.
+# + auto-enable timer ใหม่ (disabled → enable) และ daemon service ใหม่ (Type=simple ไม่มี timer คู่)
+#   → deploy hands-free ไม่ต้อง SSH ไป enable เอง. ปิดถาวรใช้ `systemctl mask <unit>`.
 #
 # ปลอดภัย: ใช้ `merge --ff-only` — ถ้า repo มี local changes/diverged จะข้าม (ไม่ทับของในเครื่อง)
 # แล้ว log เตือนไว้ใน journal (journalctl -u adsb-autoupdate).
@@ -14,6 +16,19 @@ gitc() { $RUN_AS git -C "$REPO" "$@"; }
 log()  { echo "$(date '+%F %T') $*"; }
 
 gitc fetch --quiet origin main || { log "fetch failed (network?) — ข้ามรอบนี้"; exit 0; }
+
+# ---- reconcile daemon services ทุกรอบ (ก่อนเช็คว่ามี commit ใหม่) ----
+# service ที่เป็น daemon จริง (Type=simple, ไม่มี .timer คู่, มี [Install]) → ถ้ายัง disabled ให้ enable --now.
+# ทำทุกรอบ (ไม่ผูกกับ systemd/ diff) เพราะสคริปต์นี้ self-update "รอบหน้า" — รอบที่ logic นี้เริ่มมีผล
+# อาจไม่มี diff แล้ว. idempotent (enabled อยู่แล้ว = ข้าม). อยากปิดตัวไหนถาวรใช้ `systemctl mask <s>`.
+for f in "$REPO"/systemd/*.service; do
+    s="$(basename "$f")"; b="${s%.service}"
+    [ -f "$REPO/systemd/$b.timer" ] && continue          # มี timer คู่ = oneshot ที่ timer สั่ง → ไม่ enable ตรง
+    grep -q '^\[Install\]' "$f" || continue              # ไม่มี [Install] = enable ไม่ได้
+    [ "$(systemctl is-enabled "$s" 2>/dev/null || true)" = "disabled" ] &&
+        systemctl enable --now "$s" && log "auto-enabled new service $s"
+done
+
 BEFORE="$(gitc rev-parse HEAD)"
 REMOTE="$(gitc rev-parse origin/main)"
 [ "$BEFORE" = "$REMOTE" ] && exit 0                  # ไม่มีอะไรใหม่ = เงียบ
@@ -50,6 +65,7 @@ if grep -q '^systemd/' <<<"$CHANGED"; then
 fi
 
 # ---- restart service ที่รันจาก repo ----
-grep -q '^flightwatch/' <<<"$CHANGED" && systemctl restart flight-watcher && log "restarted flight-watcher"
-grep -q '^pixoo/'       <<<"$CHANGED" && systemctl restart pixoo          && log "restarted pixoo"
+grep -q '^flightwatch/'             <<<"$CHANGED" && systemctl restart flight-watcher && log "restarted flight-watcher"
+grep -q '^pixoo/'                   <<<"$CHANGED" && systemctl restart pixoo          && log "restarted pixoo"
+grep -q '^deploy/uptime_server.py$' <<<"$CHANGED" && systemctl restart adsb-uptime    && log "restarted adsb-uptime"
 exit 0

@@ -60,16 +60,20 @@ mode: single                   # กันยิงซ้ำระหว่า�
 - ⚠️ `entity_id` = **ปลั๊กตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
 - ทดสอบจาก PC: `curl -X POST http://192.168.41.241:8123/api/webhook/<id>` → ปลั๊กควรดับแล้วติดกลับใน 60 วิ (webhook คืน 200 เสมอ)
 
-## Pi uptime จริงบนจอ (ออปชัน) — ติดตั้ง endpoint บน Pi
+## Pi uptime จริงบนจอ (ออปชัน) — endpoint บน Pi
 บรรทัด **"Pi up"** บนจอดึง uptime จริงของ Pi จาก `adsb-uptime.service` (HTTP `:8099`, stdlib).
-ถ้ายังไม่ติดตั้งจะโชว์ `Pi up -- (info svc?)`. ติดตั้งครั้งเดียวบน Pi:
+ถ้ายังไม่ขึ้นจะโชว์ `Pi up -- (info svc?)`.
+
+**ถ้ารัน `adsb-autoupdate` อยู่แล้ว → ไม่ต้องทำอะไร** — autoupdate จะ `cp` unit + `enable --now adsb-uptime`
+ให้เองภายใน ~2 รอบ (มันรู้จัก daemon service ใหม่แล้ว). เช็คด้วย `curl -s http://192.168.41.241:8099/`
+
+ถ้าไม่ได้รัน autoupdate → ติดตั้งเองครั้งเดียว:
 ```bash
 cd ~/adsb-station && git pull
 sudo cp systemd/adsb-uptime.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now adsb-uptime
 curl -s http://192.168.41.241:8099/          # ควรได้ตัวเลขวินาที uptime
 ```
-(autoupdate จะ enable ให้เองเฉพาะ *timer* ใหม่ — service ตัวนี้ต้อง `enable` เองครั้งแรก)
 
 ## ตั้งค่า + flash
 ```bash
