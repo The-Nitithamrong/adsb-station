@@ -10,7 +10,7 @@
 #include <HTTPClient.h>
 
 // ยิง HA webhook (POST) — ไม่ต้องมี token/auth (secret อยู่ใน URL). คืน true ถ้า HTTP 2xx.
-// HA รับ webhook แล้ว trigger automation (turn_off/on ปลั๊ก) แบบ async.
+// HA รับ webhook แล้ว trigger automation เดียวที่ทำ turn_off → delay → turn_on ครบวงจรเอง.
 static bool haWebhook(const char* url, uint16_t timeoutMs = 5000) {
   HTTPClient http;
   if (!http.begin(url)) return false;

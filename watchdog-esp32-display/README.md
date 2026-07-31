@@ -4,8 +4,8 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 240×320 + touch XPT2046. Config นี้ **verified บนฮาร์ดแวร์จริง** (ขอบคุณ know-how ของเจ้าของบอร์ด).
 
 **2 โหมดในเครื่องเดียว:**
-- **NORMAL (อัตโนมัติ)** — เฝ้า Pi (TCP `:22`) ทุก 30 วิ. เงียบเกิน **15 นาที** → power-cycle ปลั๊ก Tuya เอง
-- **BACKUP (มือกด)** — แตะปุ่ม **RESET PI** บนจอ (กดยืนยัน 2 ครั้ง) → Tuya OFF → **นับถอยหลัง 60 วิ** → Tuya ON
+- **NORMAL (อัตโนมัติ)** — เฝ้า Pi (TCP `:22`) ทุก 30 วิ. เงียบเกิน **15 นาที** → ยิง webhook power-cycle เอง
+- **BACKUP (มือกด)** — แตะปุ่ม **RESET PI** บนจอ (กดยืนยัน 2 ครั้ง) → ยิง **1 webhook** → HA ตัด→รอ 60 วิ→เปิดเอง
 
 > เวอร์ชันไม่มีจอ (MicroPython) อยู่ที่ `../watchdog-esp32/` สำหรับ ESP32 เปล่า
 
@@ -16,9 +16,10 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 - **ESP32 ต้องเสียบไฟคนละแหล่งกับ Pi** (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด) + ปลั๊กตั้ง **power-on state = ON**
 - ใช้ปลั๊ก **Tuya v3.3** (v3.4/3.5 tuya.h นี้ไม่รองรับ)
 
-## คุมปลั๊กยังไง: HA Webhook (default)
-โปรเจกต์นี้สั่งตัด-เปิดไฟผ่าน **Home Assistant Webhook** (`src/ha_switch.h` → `haWebhook`) — **ไม่ต้องมี token/auth**
-(secret อยู่ใน URL เอง). ESP32 → HTTP POST webhook → HA automation → turn_off/on ปลั๊ก.
+## คุมปลั๊กยังไง: HA Webhook เดียว (default)
+โปรเจกต์นี้สั่ง power-cycle ผ่าน **Home Assistant Webhook เดียว** (`src/ha_switch.h` → `haWebhook`) — **ไม่ต้องมี token/auth**
+(secret อยู่ใน URL เอง). ESP32 → HTTP POST webhook **1 ครั้ง** → HA automation เดียวทำ **turn_off → delay 60 วิ → turn_on** ครบวงจร.
+**HA เป็นคนจับเวลา** ไม่ใช่ ESP32 → ถ้า ESP32 หลุด WiFi หลังยิงไปแล้ว ปลั๊กก็เปิดกลับเอง (ทนกว่าแบบ 2 webhook).
 
 ⚠️ **กฎเหล็ก: HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด** — ถ้า HA รันบน Pi ตัวที่ถูกตัด: สั่ง OFF → Pi ดับ →
 HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้างดับถาวร**. ดังนั้น:
@@ -37,14 +38,27 @@ HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้า�
    auto-detect อาจเลือกผิดอุปกรณ์ (เช่นชน CP210x ตัวอื่น). ยืนยัน log ว่าพอร์ตถูกก่อน flash
 4. `upload_speed = 115200` (อย่าขึ้น 921600 — CH340 นี้ไม่นิ่ง)
 
-## ตั้ง HA — สร้าง 2 webhook automation
-Settings → Automations → **Create automation** → (ข้าม / Start with empty) → แก้เป็น YAML หรือ visual:
-1. **OFF**: Trigger = **Webhook** (ได้ ID มา) · Action = **Call service** `homeassistant.turn_off` → target = ปลั๊กทดสอบ
-2. **ON**: อีก automation, Webhook (ID ใหม่) · Action = `homeassistant.turn_on` → ปลั๊กเดิม
-
-เอา URL ทั้ง 2 (`http://192.168.41.241:8123/api/webhook/<id>`) ไปใส่ `HA_WEBHOOK_OFF` / `HA_WEBHOOK_ON`
-- ⚠️ target ปลั๊ก = **ตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
-- ทดสอบ webhook จาก PC: `curl -X POST http://192.168.41.241:8123/api/webhook/<id>` → ปลั๊กควรตอบสนอง (webhook คืน 200 เสมอ)
+## ตั้ง HA — สร้าง 1 webhook automation (off → delay → on)
+Settings → Automations → **Create automation** → (ข้าม / Start with empty) → **Edit in YAML** วางแบบนี้
+(แก้ `webhook_id` กับ `entity_id` เป็นของคุณ):
+```yaml
+alias: Pi power-cycle
+trigger:
+  - platform: webhook
+    webhook_id: xxxxxxxx        # ได้จาก HA — จะไปอยู่ท้าย URL
+    allowed_methods: [POST]
+    local_only: true           # รับเฉพาะใน LAN (ปลอดภัยขึ้น)
+action:
+  - service: homeassistant.turn_off
+    target: { entity_id: switch.ปลั๊กทดสอบ }
+  - delay: { seconds: 60 }     # ตั้งให้ตรงกับ OFF_SECONDS ในโค้ด
+  - service: homeassistant.turn_on
+    target: { entity_id: switch.ปลั๊กทดสอบ }
+mode: single                   # กันยิงซ้ำระหว่างกำลัง cycle
+```
+เอา URL (`http://192.168.41.241:8123/api/webhook/<webhook_id>`) ไปใส่ `HA_WEBHOOK_CYCLE`
+- ⚠️ `entity_id` = **ปลั๊กตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
+- ทดสอบจาก PC: `curl -X POST http://192.168.41.241:8123/api/webhook/<id>` → ปลั๊กควรดับแล้วติดกลับใน 60 วิ (webhook คืน 200 เสมอ)
 
 ## ตั้งค่า + flash
 ```bash
