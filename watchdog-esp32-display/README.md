@@ -16,16 +16,16 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 - **ESP32 ต้องเสียบไฟคนละแหล่งกับ Pi** (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด) + ปลั๊กตั้ง **power-on state = ON**
 - ใช้ปลั๊ก **Tuya v3.3** (v3.4/3.5 tuya.h นี้ไม่รองรับ)
 
-## คุมปลั๊กยังไง: HA REST API (default) vs Tuya local
-โปรเจกต์นี้สั่งตัด-เปิดไฟผ่าน **Home Assistant REST API** (`src/ha_switch.h`) — HA คุม Tuya อยู่แล้ว เลย
-**ไม่ต้องมี Tuya local_key** (เลี่ยงเรื่อง cloud/cloudcutter ทั้งหมด). ESP32 → HTTP POST → HA → ปลั๊ก.
+## คุมปลั๊กยังไง: HA Webhook (default)
+โปรเจกต์นี้สั่งตัด-เปิดไฟผ่าน **Home Assistant Webhook** (`src/ha_switch.h` → `haWebhook`) — **ไม่ต้องมี token/auth**
+(secret อยู่ใน URL เอง). ESP32 → HTTP POST webhook → HA automation → turn_off/on ปลั๊ก.
 
 ⚠️ **กฎเหล็ก: HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด** — ถ้า HA รันบน Pi ตัวที่ถูกตัด: สั่ง OFF → Pi ดับ →
 HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้างดับถาวร**. ดังนั้น:
-- **ตอนนี้ (HA ยังบน ADS-B Pi)** → ทดสอบตัด **ปลั๊ก/switch ตัวอื่น** เท่านั้น (เช่น พัดลม/spare) ผ่าน `HA_ENTITY`
+- **ตอนนี้ (HA ยังบน ADS-B Pi)** → automation ให้ตัด **ปลั๊ก/switch ตัวอื่น** เท่านั้น (เช่น พัดลม/spare)
 - **watchdog จริง (ตัดปลั๊ก ADS-B Pi)** → ทำได้เมื่อ **ย้าย HA ไป Pi อีกตัว** (HA อยู่คนละเครื่อง = ตัดปลอดภัย)
 
-*(ทางเลือก: `src/tuya.h` ยังมี direct Tuya v3.3 local ถ้าอยากคุมตรงไม่พึ่ง HA — แต่ต้องมี local_key)*
+*(ทางเลือก: `haSwitch` (token) + `src/tuya.h` (direct Tuya v3.3 local) ยังมีให้ ถ้าอยากใช้แทน webhook)*
 
 ## Build — PlatformIO (ไม่ใช่ Arduino IDE)
 โครง PlatformIO: `platformio.ini` + `src/main.cpp` + `src/tuya.h`. TFT_eSPI/LVGL ตั้งผ่าน **build flags**
@@ -37,12 +37,14 @@ HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้า�
    auto-detect อาจเลือกผิดอุปกรณ์ (เช่นชน CP210x ตัวอื่น). ยืนยัน log ว่าพอร์ตถูกก่อน flash
 4. `upload_speed = 115200` (อย่าขึ้น 921600 — CH340 นี้ไม่นิ่ง)
 
-## ตั้ง HA (token + entity)
-1. **HA long-lived token**: HA → คลิกโปรไฟล์ (ล่างซ้าย) → เลื่อนล่างสุด → **Long-lived access tokens → Create** → ก็อปมาใส่ `HA_TOKEN`
-2. **entity_id ปลั๊ก**: HA → Developer Tools → States → หา switch ของปลั๊ก (เช่น `switch.xxx`) → ใส่ `HA_ENTITY`
-   - ⚠️ ตอนทดสอบ (HA บน ADS-B Pi) เลือก **ปลั๊กตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
-3. `HA_BASE` = `http://<ha-ip>:8123` (ตอนนี้ `192.168.41.241:8123` — เปลี่ยนเป็น Pi ใหม่ตอนย้าย HA)
-   ทดสอบ token จาก PC: `curl -H "Authorization: Bearer <token>" http://192.168.41.241:8123/api/` → ควรได้ `{"message":"API running."}`
+## ตั้ง HA — สร้าง 2 webhook automation
+Settings → Automations → **Create automation** → (ข้าม / Start with empty) → แก้เป็น YAML หรือ visual:
+1. **OFF**: Trigger = **Webhook** (ได้ ID มา) · Action = **Call service** `homeassistant.turn_off` → target = ปลั๊กทดสอบ
+2. **ON**: อีก automation, Webhook (ID ใหม่) · Action = `homeassistant.turn_on` → ปลั๊กเดิม
+
+เอา URL ทั้ง 2 (`http://192.168.41.241:8123/api/webhook/<id>`) ไปใส่ `HA_WEBHOOK_OFF` / `HA_WEBHOOK_ON`
+- ⚠️ target ปลั๊ก = **ตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
+- ทดสอบ webhook จาก PC: `curl -X POST http://192.168.41.241:8123/api/webhook/<id>` → ปลั๊กควรตอบสนอง (webhook คืน 200 เสมอ)
 
 ## ตั้งค่า + flash
 ```bash
@@ -65,7 +67,7 @@ Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควร
 - **สีเพี้ยน** → ตรวจ `-DST7789_DRIVER -DTFT_RGB_ORDER=TFT_BGR -DTFT_INVERSION_OFF` ใน platformio.ini
 - **จอไม่ขึ้น** → เช็ค `TFT_BL=21` (active HIGH) + ST7789 driver + สาย micro-USB (ไม่ใช่ C-to-C)
 - **ทัชไม่ตอบ/ไม่ตรง** → touch ต้องอยู่ **VSPI** (pin 25/33/32/39/36) + rotation ตรงกับ calibration
-- **ปลั๊กไม่ขยับ** → เช็ค `HA_TOKEN` (curl ทดสอบ), `HA_ENTITY` ตรง entity จริงใน HA, `HA_BASE` IP:port ถูก
+- **ปลั๊กไม่ขยับ** → curl ทดสอบ webhook (`curl -X POST .../api/webhook/<id>`), เช็ค automation ใน HA ว่า target ปลั๊กถูก + enabled
 - **flash ผิดอุปกรณ์** → pin `upload_port` เสมอ, ยืนยันพอร์ตก่อน flash
 
 ## ชั้นป้องกันของสถานี (ตัวนี้คือชั้น 4 + มี manual)

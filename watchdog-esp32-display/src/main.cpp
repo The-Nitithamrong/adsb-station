@@ -6,10 +6,10 @@
 //
 // วาดด้วย TFT_eSPI ตรงๆ (ไม่ใช้ LVGL — เบา RAM, ไม่มี framebuffer, block ตอน countdown ได้).
 // จอ = ST7789 บน HSPI (ตั้งใน platformio.ini) · touch = XPT2046 บน VSPI (bus แยก).
-// คุมปลั๊กผ่าน HA REST (ha_switch.h) — ไม่ต้องมี Tuya local_key (ทางเลือก direct Tuya v3.3 อยู่ใน tuya.h).
+// คุมปลั๊กผ่าน HA Webhook (ha_switch.h → haWebhook) — ไม่ต้องมี token/auth (secret อยู่ใน URL).
 //
 // ⚠️ HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด — ไม่งั้นสั่ง OFF แล้ว HA ตายตาม สั่ง ON ไม่ได้ → Pi ค้างดับถาวร.
-//    ตอน HA ยังบน ADS-B Pi ให้ทดสอบกับปลั๊ก "ตัวอื่น" (HA_ENTITY) เท่านั้น. + ESP32 เสียบไฟคนละแหล่งกับ Pi.
+//    ตอน HA ยังบน ADS-B Pi ให้ทดสอบกับปลั๊ก "ตัวอื่น" เท่านั้น. + ESP32 เสียบไฟคนละแหล่งกับ Pi.
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -147,7 +147,7 @@ void powerCycle(const char* reason) {
   } else {
     offOk = false;
     for (int i = 0; i < 3 && !offOk; i++) {          // retry เผื่อ request แรกพลาด
-      offOk = haSwitch(HA_BASE, HA_TOKEN, HA_ENTITY, false);   // false = turn_off
+      offOk = haWebhook(HA_WEBHOOK_OFF);   // ยิง webhook → HA turn_off ปลั๊ก
       if (!offOk) delay(1500);
     }
   }
@@ -170,7 +170,7 @@ void powerCycle(const char* reason) {
   tft.drawString("POWER ON", 160, 130);
   if (!DRY_RUN) {
     for (int i = 0; i < 3; i++) {
-      if (haSwitch(HA_BASE, HA_TOKEN, HA_ENTITY, true)) break;   // true = turn_on
+      if (haWebhook(HA_WEBHOOK_ON)) break;   // ยิง webhook → HA turn_on ปลั๊ก
       delay(1500);
     }
   }
