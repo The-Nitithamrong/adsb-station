@@ -82,7 +82,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   inject `timeout=PUSH_TIMEOUT` (+ `socket.setdefaulttimeout`) so a hung push RAISES → caught → after
   `PUSH_FAIL_RECONNECT` consecutive fails it re-creates `Pixoo()` (reconnect + reset frame counter). Now the
   display self-heals after any network blip instead of needing a manual `systemctl restart pixoo`.
-  COFFEE BREAK: every `COFFEE_EVERY_MIN` (30) in [`COFFEE_START_H`:00..`COFFEE_END_H`:00] (07:00–20:00,
+  COFFEE BREAK: every `COFFEE_EVERY_MIN` (60) in [`COFFEE_START_H`:00..`COFFEE_END_H`:00] (08:00–20:00,
   machine=BKK) main overrides the rotation with the `coffee_break` page for `COFFEE_SHOW_SEC` and fires the
   Pixoo buzzer via `COFFEE_BUZZ` (`Device/PlayBuzzer`) — one fire-and-forget POST; the device loops
   `ActiveTimeInCycle`/`OffTimeInCycle` for `PlayTotalTime` (500/500/5000 = ~5 spaced beeps in 5s).
