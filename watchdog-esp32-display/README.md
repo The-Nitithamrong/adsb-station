@@ -46,7 +46,9 @@ Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควร
 **เปลี่ยน `setRotation` = ค่าพวกนี้ใช้ไม่ได้ ต้องวัดใหม่** (calibration ผูกกับ rotation).
 
 ## ทดสอบ
-- **manual**: แตะ RESET PI → TAP AGAIN (ส้ม) → แตะซ้ำใน 3 วิ → Tuya OFF + นับถอยหลัง 60 → ON
+- **ยังไม่มี key ก็ทดสอบได้**: ตั้ง `DRY_RUN 1` (ค่าเริ่มต้นใน config) → จอ/ทัช/WiFi/เฝ้า Pi + ปุ่ม→ยืนยัน→
+  countdown ทำงานครบ **โดยไม่ยิง Tuya จริง** (โชว์ "DRY RUN - no real cut"). พอได้ `TUYA_KEY` แล้วตั้ง `DRY_RUN 0`
+- **manual**: แตะ RESET PI → TAP AGAIN (ส้ม) → แตะซ้ำใน 3 วิ → (DRY_RUN=0) Tuya OFF + นับถอยหลัง 60 → ON
 - **auto**: ลด `DOWN_MS` เป็น `120000UL` (2 นาที) ชั่วคราว → ทำ Pi เข้าไม่ถึง → รอ 2 นาที → power-cycle เอง → คืน `900000UL`
 
 ## Troubleshooting (จาก field notes)

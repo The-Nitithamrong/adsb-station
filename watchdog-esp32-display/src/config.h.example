@@ -23,3 +23,7 @@
 #define OFF_SECONDS     60          // ตัดไฟค้างกี่วินาที (= เวลานับถอยหลังบนจอ)
 #define COOLDOWN_MS     1500000UL   // หลัง cycle เว้นกี่ ms ก่อน auto-cycle ใหม่ (1500000 = 25 นาที)
 #define TCP_TIMEOUT_MS  4000        // timeout ต่อการเช็ค Pi 1 ครั้ง
+
+// --- ทดสอบ ---
+#define DRY_RUN         1           // 1 = ทดสอบ UI/ปุ่ม/countdown โดยไม่ยิง Tuya จริง (ตอนยังไม่มี key)
+                                    // ตั้ง 0 เมื่อได้ TUYA_KEY จริงแล้ว (ถึงจะตัด-เปิดไฟจริง)

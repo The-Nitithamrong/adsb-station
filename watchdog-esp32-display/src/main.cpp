@@ -121,11 +121,19 @@ void powerCycle(const char* reason) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(reason, 160, 58);
 
-  bool offOk = false;
-  for (int i = 0; i < 3 && !offOk; i++) {            // retry เผื่อ frame แรกหาย
-    offOk = tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, false, TUYA_DP);
-    if (!offOk) delay(1500);
+  // DRY_RUN=1 → ทดสอบ UI ไม่ยิง Tuya จริง (ตอนยังไม่มี key) — โชว์ countdown ครบแต่ไม่ตัดไฟ
+  bool offOk;
+  if (DRY_RUN) {
+    offOk = true;
+  } else {
+    offOk = false;
+    for (int i = 0; i < 3 && !offOk; i++) {          // retry เผื่อ frame แรกหาย
+      offOk = tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, false, TUYA_DP);
+      if (!offOk) delay(1500);
+    }
   }
+  const char* offMsg = DRY_RUN ? "DRY RUN - no real cut"
+                               : (offOk ? "Pi OFF - power back in..." : "TUYA OFF FAILED - check plug");
   for (int s = OFF_SECONDS; s > 0; s--) {            // นับถอยหลังบนจอ (block ได้ — ไม่มี LVGL ต้อง service)
     tft.fillRect(0, 90, SCREEN_W, 110, TFT_BLACK);
     tft.setTextColor(offOk ? TFT_YELLOW : TFT_RED, TFT_BLACK);
@@ -134,16 +142,18 @@ void powerCycle(const char* reason) {
     tft.drawString(buf, 160, 130);
     tft.setTextSize(1);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString(offOk ? "Pi OFF - power back in..." : "TUYA OFF FAILED - check plug", 160, 190);
+    tft.drawString(offMsg, 160, 190);
     delay(1000);
   }
   tft.fillRect(0, 90, SCREEN_W, 130, TFT_BLACK);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
   tft.setTextSize(3);
   tft.drawString("POWER ON", 160, 130);
-  for (int i = 0; i < 3; i++) {
-    if (tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, true, TUYA_DP)) break;
-    delay(1500);
+  if (!DRY_RUN) {
+    for (int i = 0; i < 3; i++) {
+      if (tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, true, TUYA_DP)) break;
+      delay(1500);
+    }
   }
   delay(2000);
   unsigned long now = millis();                      // รีเซ็ตตัวนับ — ให้ Pi boot ก่อน
