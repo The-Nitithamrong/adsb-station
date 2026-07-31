@@ -17,7 +17,6 @@
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <time.h>
-#include "esp_sntp.h"   // sntp_set_time_sync_notification_cb — จับเวลา NTP sync สำเร็จ ("last sync")
 #include "config.h"
 #include "ha_switch.h"
 
@@ -56,10 +55,8 @@ unsigned long lastReset = 0;   // millis ตอน power-cycle รอบล่�
 bool forceUI = true, dWifi = false, dPiUp = false;
 char dLine[64] = {0}, dLine2[64] = {0};   // dLine = บรรทัด reset, dLine2 = บรรทัด sync
 
-// NTP sync — SNTP callback เก็บ "เวลาจริง" ที่ sync สำเร็จ (แสดงเป็นวันเวลานิ่งๆ ไม่วิ่ง/ไม่กระพริบ)
-volatile bool everSync = false;
-volatile time_t syncEpoch = 0;
-void onTimeSync(struct timeval* tv) { syncEpoch = tv->tv_sec; everSync = true; }
+// เวลาจริง (epoch) ของการเช็ค Pi รอบล่าสุด — โชว์ "last check HH:MM:SS" อัปเดตทุก CHECK_MS (30 วิ)
+time_t lastCheckEpoch = 0;
 
 // รูปแบบเดียวกับ Pixoo (_fmt2): 2 หน่วยบนสุด ไม่มีวินาที เช่น "3D 14H" / "14H 22M" / "22M"
 void fmtUp(char* b, size_t n, unsigned long s) {
@@ -150,17 +147,18 @@ void drawDynamic() {  // วาดใหม่เฉพาะส่วนที�
     strncpy(dLine, line, sizeof(dLine) - 1);
   }
 
-  // บรรทัด 2 — sync: "วันเวลาจริง" ที่ NTP sync ล่าสุด (นิ่ง ไม่วิ่ง/กระพริบ — เปลี่ยนตอน re-sync ~ราย ชม.)
+  // บรรทัด 2 — check: เวลาจริง (HH:MM:SS) ที่ ping Pi รอบล่าสุด — เปลี่ยนทุก 30 วิ (ไม่กระพริบ)
   char line2[64];
-  if (everSync) { struct tm t; time_t e = syncEpoch; localtime_r(&e, &t);
-                  char ts[24]; strftime(ts, sizeof(ts), "%d/%m %H:%M", &t);
-                  snprintf(line2, sizeof(line2), "last sync %s", ts); }
-  else          snprintf(line2, sizeof(line2), "sync: waiting NTP...");
+  bool haveClock = lastCheckEpoch > 1600000000;   // นาฬิกา NTP มาแล้ว (ไม่ใช่ปี 1970)
+  if (haveClock) { struct tm t; localtime_r(&lastCheckEpoch, &t);
+                   char ts[16]; strftime(ts, sizeof(ts), "%H:%M:%S", &t);
+                   snprintf(line2, sizeof(line2), "last check %s", ts); }
+  else           snprintf(line2, sizeof(line2), "check: waiting NTP...");
   if (forceUI || strcmp(line2, dLine2) != 0) {
     tft.fillRect(0, 132, SCREEN_W, 15, TFT_BLACK);
     tft.setTextDatum(MC_DATUM);
     tft.setTextSize(1);
-    tft.setTextColor(everSync ? TFT_DARKGREY : TFT_RED, TFT_BLACK);
+    tft.setTextColor(haveClock ? TFT_DARKGREY : TFT_RED, TFT_BLACK);
     tft.drawString(line2, 160, 139);
     strncpy(dLine2, line2, sizeof(dLine2) - 1);
   }
@@ -232,8 +230,7 @@ void setup() {
   tft.setTextSize(2);
   tft.drawString("Connecting WiFi...", 160, 120);
   connectWiFi();
-  sntp_set_time_sync_notification_cb(onTimeSync);    // จับ "last sync" ก่อน configTime เริ่ม SNTP
-  configTime(7 * 3600, 0, "pool.ntp.org");           // BKK UTC+7 (field 't' ของ Tuya)
+  configTime(7 * 3600, 0, "pool.ntp.org");           // BKK UTC+7 (นาฬิกาสำหรับ "last check")
 
   unsigned long now = millis();
   lastPiOk = now; lastCheck = 0; lastDraw = 0;
@@ -276,6 +273,7 @@ void loop() {
   if (millis() - lastCheck >= CHECK_MS) {
     lastCheck = millis();
     if (wifiUp) {
+      lastCheckEpoch = time(nullptr);                // เวลาจริงของรอบเช็คนี้ → บรรทัด "last check"
       piUp = piAlive();
       if (piUp) {
         lastPiOk = millis();
