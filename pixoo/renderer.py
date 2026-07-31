@@ -156,9 +156,9 @@ def text(d, xy, s, font, color, anchor="la"):
 
 
 def draw_header(d, now):
-    """เวลา (big) + วันที่ (small) + เส้นคั่น — colon กระพริบ 1 Hz (วินาทีคี่ = ซ่อน)"""
+    """เวลา (big) + วันที่ (small) + เส้นคั่น — colon กระพริบทุก 0.5 วิ (ครึ่งวิหลัง = ซ่อน)"""
     t = now.strftime("%H:%M")
-    if now.second % 2:                       # ':' กับ ' ' กว้างเท่ากันในฟอนต์ → ตัวเลขไม่ขยับ
+    if now.microsecond >= 500_000:           # ':' กับ ' ' กว้างเท่ากันในฟอนต์ → ตัวเลขไม่ขยับ
         t = t.replace(":", " ")
     text(d, (32, 1),  t,                         "big",   PALETTE["time"], anchor="ma")   # y1..14
     text(d, (32, 16), now.strftime("%a %d %b"), "small", PALETTE["date"], anchor="ma")   # y16..22
