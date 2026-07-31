@@ -1,0 +1,25 @@
+// config.h.example — คัดลอกเป็น config.h แล้วเติมค่า
+// (config.h ไม่ขึ้น repo — อยู่ใน .gitignore เพราะมี wifi pass + tuya local_key)
+#pragma once
+
+// --- WiFi (วงเดียวกับ Pi + ปลั๊ก Tuya) ---
+#define WIFI_SSID   "Arin II"
+#define WIFI_PASS   "<wifi password>"
+
+// --- Pi ที่จะเฝ้า ---
+#define PI_IP       "192.168.41.241"
+#define PI_PORT     22          // พอร์ตที่เช็ค (22=SSH — เปิดเสมอถ้า network stack ของ Pi มีชีวิต)
+
+// --- ปลั๊ก Tuya ที่จ่ายไฟ Pi (v3.3, จาก tinytuya) ---
+// ตั้ง DHCP Reservation ให้ IP นิ่ง + ตั้ง power-on state = ON ในแอป Smart Life
+#define TUYA_IP     "192.168.41.177"
+#define TUYA_ID     "eb101d70fa0bb4f8cfojwd"    // device_id (จาก scan)
+#define TUYA_KEY    "<local_key 16 ตัว จาก tinytuya wizard>"
+#define TUYA_DP     "1"         // DP ของสวิตช์หลัก — ปลั๊กส่วนใหญ่ = "1" (เช็คด้วย tinytuya ถ้าไม่แน่ใจ)
+
+// --- จูน ---
+#define CHECK_MS        30000UL     // เช็ค Pi ทุกกี่ ms (30 วิ)
+#define DOWN_MS         900000UL    // Pi เงียบเกินกี่ ms → auto power-cycle (900000 = 15 นาที)
+#define OFF_SECONDS     60          // ตัดไฟค้างกี่วินาที (= เวลานับถอยหลังบนจอ)
+#define COOLDOWN_MS     1500000UL   // หลัง cycle เว้นกี่ ms ก่อน auto-cycle ใหม่ (1500000 = 25 นาที)
+#define TCP_TIMEOUT_MS  4000        // timeout ต่อการเช็ค Pi 1 ครั้ง
