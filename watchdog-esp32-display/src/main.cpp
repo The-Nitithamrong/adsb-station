@@ -1,13 +1,15 @@
 // main.cpp — Pi power-cycle watchdog บนบอร์ด CYD2USB (Sunton ESP32-2432S028Rv3: ST7789 240x320 + XPT2046)
 //
 // 2 โหมดในเครื่องเดียว:
-//   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (15 นาที) → auto power-cycle ปลั๊ก Tuya
-//   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → Tuya OFF → นับถอยหลัง OFF_SECONDS บนจอ → Tuya ON
+//   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (15 นาที) → auto power-cycle
+//   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → OFF → นับถอยหลัง OFF_SECONDS บนจอ → ON
 //
 // วาดด้วย TFT_eSPI ตรงๆ (ไม่ใช้ LVGL — เบา RAM, ไม่มี framebuffer, block ตอน countdown ได้).
-// จอ = ST7789 บน HSPI (ตั้งใน platformio.ini) · touch = XPT2046 บน VSPI (bus แยก) · Tuya v3.3 local = tuya.h.
+// จอ = ST7789 บน HSPI (ตั้งใน platformio.ini) · touch = XPT2046 บน VSPI (bus แยก).
+// คุมปลั๊กผ่าน HA REST (ha_switch.h) — ไม่ต้องมี Tuya local_key (ทางเลือก direct Tuya v3.3 อยู่ใน tuya.h).
 //
-// ⚠️ ESP32 ต้องเสียบไฟ "คนละแหล่ง" กับ Pi (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด!) + ตั้ง power-on state ปลั๊ก = ON
+// ⚠️ HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด — ไม่งั้นสั่ง OFF แล้ว HA ตายตาม สั่ง ON ไม่ได้ → Pi ค้างดับถาวร.
+//    ตอน HA ยังบน ADS-B Pi ให้ทดสอบกับปลั๊ก "ตัวอื่น" (HA_ENTITY) เท่านั้น. + ESP32 เสียบไฟคนละแหล่งกับ Pi.
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -16,7 +18,7 @@
 #include <XPT2046_Touchscreen.h>
 #include <time.h>
 #include "config.h"
-#include "tuya.h"
+#include "ha_switch.h"
 
 // --- touch XPT2046 บน VSPI (bus แยกจากจอที่อยู่ HSPI) — pin ของ CYD2USB ---
 #define XPT2046_IRQ  36
@@ -47,6 +49,10 @@ XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 bool wifiUp = false, piUp = true;
 unsigned long lastPiOk = 0, lastCheck = 0, lastCycle = 0, lastDraw = 0, confirmUntil = 0;
+
+// สถานะที่วาดล่าสุด (กัน flicker: วาดใหม่เฉพาะส่วนที่เปลี่ยน — เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
+bool forceUI = true, dWifi = false, dPiUp = false;
+char dLine[64] = {0};
 
 // ---------- WiFi ----------
 void connectWiFi() {
@@ -92,22 +98,35 @@ void drawStatic() {   // header + ปุ่ม (วาดครั้งเด�
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.drawString("Pi WATCHDOG", 6, 6);
   drawButton(confirmUntil && millis() < confirmUntil);
+  forceUI = true;     // หลังล้างจอ → drawDynamic วาดทุกส่วนใหม่ 1 รอบ
 }
 
-void drawDynamic() {  // สถานะ + รายละเอียด (รีเฟรช ~1 วิ, เคลียร์เฉพาะโซนกัน flicker)
-  tft.fillCircle(305, 14, 6, wifiUp ? TFT_GREEN : TFT_RED);   // WiFi dot
-  tft.fillRect(0, 45, SCREEN_W, 110, TFT_BLACK);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextSize(4);
-  tft.setTextColor(piUp ? TFT_GREEN : TFT_RED, TFT_BLACK);
-  tft.drawString(piUp ? "Pi OK" : "Pi DOWN", 160, 75);
-  tft.setTextSize(1);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  char line[64];
+void drawDynamic() {  // วาดใหม่เฉพาะส่วนที่เปลี่ยน → ไม่ flicker (เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
+  if (forceUI || dWifi != wifiUp) {                          // WiFi dot: เปลี่ยนเฉพาะตอนสถานะเปลี่ยน
+    tft.fillCircle(305, 14, 6, wifiUp ? TFT_GREEN : TFT_RED);
+    dWifi = wifiUp;
+  }
+  if (forceUI || dPiUp != piUp) {                            // "Pi OK/DOWN" ตัวใหญ่: เปลี่ยนเฉพาะตอนสถานะพลิก
+    tft.fillRect(0, 55, SCREEN_W, 42, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(4);
+    tft.setTextColor(piUp ? TFT_GREEN : TFT_RED, TFT_BLACK);
+    tft.drawString(piUp ? "Pi OK" : "Pi DOWN", 160, 75);
+    dPiUp = piUp;
+  }
+  char line[64];                                             // บรรทัดรายละเอียด: วาดเฉพาะเมื่อข้อความเปลี่ยน
   unsigned long ago = (millis() - lastPiOk) / 1000;
   if (piUp) snprintf(line, sizeof(line), "last ok %lus ago", ago);
   else      snprintf(line, sizeof(line), "down %lum%02lus  (reset at %lum)", ago / 60, ago % 60, DOWN_MS / 60000);
-  tft.drawString(line, 160, 120);
+  if (forceUI || strcmp(line, dLine) != 0) {
+    tft.fillRect(0, 113, SCREEN_W, 15, TFT_BLACK);           // ล้างเฉพาะแถบบางๆ ของบรรทัดนี้
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(line, 160, 120);
+    strncpy(dLine, line, sizeof(dLine) - 1);
+  }
+  forceUI = false;
 }
 
 // ---------- power-cycle (ใช้ร่วมทั้ง auto + manual) ----------
@@ -121,19 +140,19 @@ void powerCycle(const char* reason) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(reason, 160, 58);
 
-  // DRY_RUN=1 → ทดสอบ UI ไม่ยิง Tuya จริง (ตอนยังไม่มี key) — โชว์ countdown ครบแต่ไม่ตัดไฟ
+  // DRY_RUN=1 → ทดสอบ UI ไม่ยิง HA จริง — โชว์ countdown ครบแต่ไม่ตัดไฟ
   bool offOk;
   if (DRY_RUN) {
     offOk = true;
   } else {
     offOk = false;
-    for (int i = 0; i < 3 && !offOk; i++) {          // retry เผื่อ frame แรกหาย
-      offOk = tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, false, TUYA_DP);
+    for (int i = 0; i < 3 && !offOk; i++) {          // retry เผื่อ request แรกพลาด
+      offOk = haSwitch(HA_BASE, HA_TOKEN, HA_ENTITY, false);   // false = turn_off
       if (!offOk) delay(1500);
     }
   }
   const char* offMsg = DRY_RUN ? "DRY RUN - no real cut"
-                               : (offOk ? "Pi OFF - power back in..." : "TUYA OFF FAILED - check plug");
+                               : (offOk ? "Pi OFF - power back in..." : "HA OFF FAILED - check token/entity");
   for (int s = OFF_SECONDS; s > 0; s--) {            // นับถอยหลังบนจอ (block ได้ — ไม่มี LVGL ต้อง service)
     tft.fillRect(0, 90, SCREEN_W, 110, TFT_BLACK);
     tft.setTextColor(offOk ? TFT_YELLOW : TFT_RED, TFT_BLACK);
@@ -151,7 +170,7 @@ void powerCycle(const char* reason) {
   tft.drawString("POWER ON", 160, 130);
   if (!DRY_RUN) {
     for (int i = 0; i < 3; i++) {
-      if (tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, true, TUYA_DP)) break;
+      if (haSwitch(HA_BASE, HA_TOKEN, HA_ENTITY, true)) break;   // true = turn_on
       delay(1500);
     }
   }

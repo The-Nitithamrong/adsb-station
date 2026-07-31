@@ -10,12 +10,12 @@
 #define PI_IP       "192.168.41.241"
 #define PI_PORT     22          // พอร์ตที่เช็ค (22=SSH — เปิดเสมอถ้า network stack ของ Pi มีชีวิต)
 
-// --- ปลั๊ก Tuya ที่จ่ายไฟ Pi (v3.3, จาก tinytuya) ---
-// ตั้ง DHCP Reservation ให้ IP นิ่ง + ตั้ง power-on state = ON ในแอป Smart Life
-#define TUYA_IP     "192.168.41.177"
-#define TUYA_ID     "eb101d70fa0bb4f8cfojwd"    // device_id (จาก scan)
-#define TUYA_KEY    "<local_key 16 ตัว จาก tinytuya wizard>"
-#define TUYA_DP     "1"         // DP ของสวิตช์หลัก — ปลั๊กส่วนใหญ่ = "1" (เช็คด้วย tinytuya ถ้าไม่แน่ใจ)
+// --- Home Assistant (คุมปลั๊กผ่าน HA REST API — ไม่ต้องมี Tuya local_key) ---
+#define HA_BASE     "http://192.168.41.241:8123"   // IP:port ของ HA (เปลี่ยนเป็น Pi ใหม่ตอนย้าย HA)
+#define HA_TOKEN    "<HA long-lived access token>" // HA → โปรไฟล์ → Long-lived access tokens → Create
+// ⚠️ entity ที่จะตัด — ตอนทดสอบ (HA ยังบน ADS-B Pi) ใช้ปลั๊ก/switch "ตัวอื่น" เท่านั้น
+//    ห้ามใช้ปลั๊กของ Pi ที่รัน HA (สั่ง OFF → HA ตาย → สั่ง ON ไม่ได้ → Pi ค้างดับ)
+#define HA_ENTITY   "switch.your_plug"
 
 // --- จูน ---
 #define CHECK_MS        30000UL     // เช็ค Pi ทุกกี่ ms (30 วิ)
@@ -25,5 +25,5 @@
 #define TCP_TIMEOUT_MS  4000        // timeout ต่อการเช็ค Pi 1 ครั้ง
 
 // --- ทดสอบ ---
-#define DRY_RUN         1           // 1 = ทดสอบ UI/ปุ่ม/countdown โดยไม่ยิง Tuya จริง (ตอนยังไม่มี key)
-                                    // ตั้ง 0 เมื่อได้ TUYA_KEY จริงแล้ว (ถึงจะตัด-เปิดไฟจริง)
+#define DRY_RUN         1           // 1 = ทดสอบ UI/ปุ่ม/countdown โดยไม่ยิง HA จริง
+                                    // ตั้ง 0 เมื่อใส่ HA_TOKEN/HA_ENTITY แล้ว (ถึงจะตัด-เปิดไฟจริง)
