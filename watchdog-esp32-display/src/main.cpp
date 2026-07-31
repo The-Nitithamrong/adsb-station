@@ -14,6 +14,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <time.h>
@@ -47,16 +48,18 @@ TFT_eSPI tft = TFT_eSPI();
 SPIClass touchSpi(VSPI);
 XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
-bool wifiUp = false, piUp = true, everReset = false;
+bool wifiUp = false, piUp = true;
 unsigned long lastPiOk = 0, lastCheck = 0, lastCycle = 0, lastDraw = 0, confirmUntil = 0;
-unsigned long lastReset = 0;   // millis ตอน power-cycle รอบล่าสุด (แสดง "last reset" — โตเป็นชั่วโมง/วัน ไม่เหมือน last ok ที่รีทุก 30 วิ)
 
 // สถานะที่วาดล่าสุด (กัน flicker: วาดใหม่เฉพาะส่วนที่เปลี่ยน — เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
 bool forceUI = true, dWifi = false, dPiUp = false;
-char dLine[64] = {0}, dLine2[64] = {0};   // dLine = บรรทัด reset, dLine2 = บรรทัด sync
+char dLine[64] = {0}, dLine2[64] = {0};   // dLine = บรรทัด Pi up, dLine2 = บรรทัด last check
 
 // เวลาจริง (epoch) ของการเช็ค Pi รอบล่าสุด — โชว์ "last check HH:MM:SS" อัปเดตทุก CHECK_MS (30 วิ)
 time_t lastCheckEpoch = 0;
+// uptime จริงของ Pi (วินาที) ดึงจาก endpoint บน Pi ทุกรอบเช็ค — -1 = ยังไม่ได้/ดึงไม่ได้
+long piUpSecs = -1;
+unsigned long piUpAtMillis = 0;   // millis ตอนได้ค่า piUpSecs (ไว้ interpolate ระหว่างรอบเช็ค)
 
 // รูปแบบเดียวกับ Pixoo (_fmt2): 2 หน่วยบนสุด ไม่มีวินาที เช่น "3D 14H" / "14H 22M" / "22M"
 void fmtUp(char* b, size_t n, unsigned long s) {
@@ -81,6 +84,19 @@ bool piAlive() {
   bool ok = c.connect(PI_IP, PI_PORT, TCP_TIMEOUT_MS);   // ต่อ TCP ได้ = Pi มีชีวิตระดับ network
   c.stop();
   return ok;
+}
+
+// uptime จริงของ Pi (วินาที) จาก endpoint adsb-uptime.service — คืน -1 ถ้าดึงไม่ได้ (service ยังไม่ลง/ล่ม)
+// display-only + best-effort: ไม่ใช่ตัวตัดสิน reset (liveness ยังใช้ piAlive/TCP:22 เพราะ server อาจล่มขณะ Pi ปกติ)
+long piUptimeS() {
+  HTTPClient http;
+  char url[48];
+  snprintf(url, sizeof(url), "http://%s:%d/", PI_IP, PI_INFO_PORT);
+  if (!http.begin(url)) return -1;
+  http.setTimeout(TCP_TIMEOUT_MS);
+  long s = (http.GET() == 200) ? http.getString().toInt() : -1;
+  http.end();
+  return s;
 }
 
 // ---------- touch ----------
@@ -126,14 +142,17 @@ void drawDynamic() {  // วาดใหม่เฉพาะส่วนที�
     tft.drawString(piUp ? "Pi OK" : "Pi DOWN", 160, 75);
     dPiUp = piUp;
   }
-  // บรรทัด 1 — reset: Pi ปกติ → "last reset" (เวลาตั้งแต่ power-cycle รอบล่าสุด — โตเป็น ชม./วัน
-  // ไม่เหมือน last ok เดิมที่รีทุก 30 วิ). ยังไม่เคยตัด → "up ... no reset yet". Pi ดับ → นับถอยหลัง
+  // บรรทัด 1 — Pi uptime จริง (จาก endpoint บน Pi) ฟอร์แมตแบบ Pixoo. ดึงไม่ได้ → "-- (info svc?)".
+  // Pi ดับ → นับถอยหลังถึงเวลา auto-reset แทน
   char line[64], num[16];
   if (piUp) {
-    if (everReset) { fmtUp(num, sizeof(num), (millis() - lastReset) / 1000);
-                     snprintf(line, sizeof(line), "last reset %s ago", num); }
-    else           { fmtUp(num, sizeof(num), millis() / 1000);
-                     snprintf(line, sizeof(line), "up %s  no reset yet", num); }
+    if (piUpSecs >= 0) {
+      unsigned long s = (unsigned long)piUpSecs + (millis() - piUpAtMillis) / 1000;  // interpolate ระหว่างรอบเช็ค
+      fmtUp(num, sizeof(num), s);
+      snprintf(line, sizeof(line), "Pi up %s", num);
+    } else {
+      snprintf(line, sizeof(line), "Pi up -- (info svc?)");
+    }
   } else {
     unsigned long ago = (millis() - lastPiOk) / 1000;
     snprintf(line, sizeof(line), "down %lum%02lus  (reset at %lum)", ago / 60, ago % 60, DOWN_MS / 60000);
@@ -209,7 +228,7 @@ void powerCycle(const char* reason) {
   delay(2000);
   unsigned long now = millis();                      // รีเซ็ตตัวนับ — ให้ Pi boot ก่อน
   lastPiOk = now; lastCycle = now; lastCheck = now; piUp = true;
-  lastReset = now; everReset = true;                 // จำเวลา power-cycle รอบนี้ → บรรทัด "last reset"
+  piUpSecs = -1;                                     // Pi เพิ่ง reboot → รอเช็ครอบหน้าดึง uptime ใหม่
 }
 
 // ---------- setup / loop ----------
@@ -277,9 +296,13 @@ void loop() {
       piUp = piAlive();
       if (piUp) {
         lastPiOk = millis();
-      } else if (millis() - lastPiOk >= DOWN_MS && millis() - lastCycle >= COOLDOWN_MS) {
-        powerCycle("no signal 15m");
-        drawStatic();
+        piUpSecs = piUptimeS(); piUpAtMillis = millis();   // ดึง uptime จริงของ Pi มาโชว์
+      } else {
+        piUpSecs = -1;                               // Pi ดับ → uptime ไม่รู้
+        if (millis() - lastPiOk >= DOWN_MS && millis() - lastCycle >= COOLDOWN_MS) {
+          powerCycle("no signal 15m");
+          drawStatic();
+        }
       }
     }
   }
