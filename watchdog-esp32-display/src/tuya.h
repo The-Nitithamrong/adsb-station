@@ -1,12 +1,16 @@
 // tuya.h — Tuya v3.3 local control (ESP32 Arduino) — สั่ง on/off ปลั๊กในบ้านตรงๆ ไม่พึ่ง cloud.
 // โปรโตคอล 55AA frame + AES-128-ECB(local_key) ผ่าน mbedtls (มากับ ESP32 core). CONTROL (0x07) พอ.
 // รองรับ v3.3 เท่านั้น (AES-ECB). ต้องรู้: device_id, local_key (16 ตัว), ip, dp (ปลั๊ก = "1").
+//
+// ทำไม direct Tuya local (ไม่ใช่ HA REST API): watchdog ต้องกู้ Pi ตอน Pi แฮงก์ — ซึ่ง HA รันบน Pi
+// เลยตายไปด้วย → คุมผ่าน HA ไม่ได้ตอนที่ต้องใช้ที่สุด. direct local = อิสระจาก Pi/HA (แลกกับเก็บ local_key
+// บนเครื่อง แต่คุมได้แค่ปลั๊กเดียวใน LAN). งานอื่น (โชว์ sensor/คุมตอน Pi ยังอยู่) ค่อยใช้ HA REST API แยก.
 #pragma once
 #include <WiFi.h>
 #include <time.h>
 #include "mbedtls/aes.h"
 
-// CRC32 (poly 0xEDB88320) — ตรงกับ tinytuya
+// CRC32 (poly 0xEDB88320) — ตรงกับ tinytuya (ทดสอบตรงกับ binascii.crc32)
 static uint32_t tuyaCrc32(const uint8_t* data, size_t len) {
   uint32_t crc = 0xFFFFFFFF;
   for (size_t i = 0; i < len; i++) {
