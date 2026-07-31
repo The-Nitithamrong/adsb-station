@@ -17,6 +17,7 @@
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <time.h>
+#include "esp_sntp.h"   // sntp_set_time_sync_notification_cb — จับเวลา NTP sync สำเร็จ ("last sync")
 #include "config.h"
 #include "ha_switch.h"
 
@@ -47,12 +48,24 @@ TFT_eSPI tft = TFT_eSPI();
 SPIClass touchSpi(VSPI);
 XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
-bool wifiUp = false, piUp = true;
+bool wifiUp = false, piUp = true, everReset = false;
 unsigned long lastPiOk = 0, lastCheck = 0, lastCycle = 0, lastDraw = 0, confirmUntil = 0;
+unsigned long lastReset = 0;   // millis ตอน power-cycle รอบล่าสุด (แสดง "last reset" — โตเป็นชั่วโมง/วัน ไม่เหมือน last ok ที่รีทุก 30 วิ)
 
 // สถานะที่วาดล่าสุด (กัน flicker: วาดใหม่เฉพาะส่วนที่เปลี่ยน — เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
 bool forceUI = true, dWifi = false, dPiUp = false;
-char dLine[64] = {0};
+char dLine[64] = {0}, dLine2[64] = {0};   // dLine = บรรทัด reset, dLine2 = บรรทัด sync
+
+// NTP sync — SNTP callback เซ็ตค่าเมื่อ sync เวลาสำเร็จ (volatile: เขียนจาก callback)
+volatile bool everSync = false;
+volatile unsigned long lastSync = 0;
+void onTimeSync(struct timeval*) { lastSync = millis(); everSync = true; }
+
+// "1m05s ago" ถ้า <1 ชม. ไม่งั้น "2h13m ago" — ใส่แค่ตัวเลข (คำว่า ago เติมตอนเรียก)
+void fmtAgo(char* b, size_t n, unsigned long s) {
+  if (s < 3600) snprintf(b, n, "%lum%02lus", s / 60, s % 60);
+  else          snprintf(b, n, "%luh%02lum", s / 3600, (s % 3600) / 60);
+}
 
 // ---------- WiFi ----------
 void connectWiFi() {
@@ -114,17 +127,39 @@ void drawDynamic() {  // วาดใหม่เฉพาะส่วนที�
     tft.drawString(piUp ? "Pi OK" : "Pi DOWN", 160, 75);
     dPiUp = piUp;
   }
-  char line[64];                                             // บรรทัดรายละเอียด: วาดเฉพาะเมื่อข้อความเปลี่ยน
-  unsigned long ago = (millis() - lastPiOk) / 1000;
-  if (piUp) snprintf(line, sizeof(line), "last ok %lus ago", ago);
-  else      snprintf(line, sizeof(line), "down %lum%02lus  (reset at %lum)", ago / 60, ago % 60, DOWN_MS / 60000);
+  // บรรทัด 1 — reset: Pi ปกติ → "last reset" (เวลาตั้งแต่ power-cycle รอบล่าสุด — โตเป็น ชม./วัน
+  // ไม่เหมือน last ok เดิมที่รีทุก 30 วิ). ยังไม่เคยตัด → "up ... no reset yet". Pi ดับ → นับถอยหลัง
+  char line[64], num[16];
+  if (piUp) {
+    if (everReset) { fmtAgo(num, sizeof(num), (millis() - lastReset) / 1000);
+                     snprintf(line, sizeof(line), "last reset %s ago", num); }
+    else           { fmtAgo(num, sizeof(num), millis() / 1000);
+                     snprintf(line, sizeof(line), "up %s  no reset yet", num); }
+  } else {
+    unsigned long ago = (millis() - lastPiOk) / 1000;
+    snprintf(line, sizeof(line), "down %lum%02lus  (reset at %lum)", ago / 60, ago % 60, DOWN_MS / 60000);
+  }
   if (forceUI || strcmp(line, dLine) != 0) {
-    tft.fillRect(0, 113, SCREEN_W, 15, TFT_BLACK);           // ล้างเฉพาะแถบบางๆ ของบรรทัดนี้
+    tft.fillRect(0, 110, SCREEN_W, 15, TFT_BLACK);           // ล้างเฉพาะแถบบางๆ ของบรรทัดนี้
     tft.setTextDatum(MC_DATUM);
     tft.setTextSize(1);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString(line, 160, 120);
+    tft.drawString(line, 160, 117);
     strncpy(dLine, line, sizeof(dLine) - 1);
+  }
+
+  // บรรทัด 2 — sync: เวลาตั้งแต่ NTP sync สำเร็จล่าสุด (นาฬิกา ESP32 สด/ค้าง). ยังไม่ sync → รอ NTP
+  char line2[64], num2[16];
+  if (everSync) { fmtAgo(num2, sizeof(num2), (millis() - lastSync) / 1000);
+                  snprintf(line2, sizeof(line2), "last sync %s ago", num2); }
+  else          snprintf(line2, sizeof(line2), "sync: waiting NTP...");
+  if (forceUI || strcmp(line2, dLine2) != 0) {
+    tft.fillRect(0, 132, SCREEN_W, 15, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(1);
+    tft.setTextColor(everSync ? TFT_DARKGREY : TFT_RED, TFT_BLACK);
+    tft.drawString(line2, 160, 139);
+    strncpy(dLine2, line2, sizeof(dLine2) - 1);
   }
   forceUI = false;
 }
@@ -173,6 +208,7 @@ void powerCycle(const char* reason) {
   delay(2000);
   unsigned long now = millis();                      // รีเซ็ตตัวนับ — ให้ Pi boot ก่อน
   lastPiOk = now; lastCycle = now; lastCheck = now; piUp = true;
+  lastReset = now; everReset = true;                 // จำเวลา power-cycle รอบนี้ → บรรทัด "last reset"
 }
 
 // ---------- setup / loop ----------
@@ -193,6 +229,7 @@ void setup() {
   tft.setTextSize(2);
   tft.drawString("Connecting WiFi...", 160, 120);
   connectWiFi();
+  sntp_set_time_sync_notification_cb(onTimeSync);    // จับ "last sync" ก่อน configTime เริ่ม SNTP
   configTime(7 * 3600, 0, "pool.ntp.org");           // BKK UTC+7 (field 't' ของ Tuya)
 
   unsigned long now = millis();
