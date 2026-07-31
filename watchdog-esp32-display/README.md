@@ -16,10 +16,16 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 - **ESP32 ต้องเสียบไฟคนละแหล่งกับ Pi** (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด) + ปลั๊กตั้ง **power-on state = ON**
 - ใช้ปลั๊ก **Tuya v3.3** (v3.4/3.5 tuya.h นี้ไม่รองรับ)
 
-## ทำไม direct Tuya local (ไม่ใช่ HA REST API) สำหรับ "reset Pi"
-**HA รันบน Pi** → ตอน Pi แฮงก์ (จังหวะที่ watchdog ต้องทำงาน) HA ตายด้วย → คุม Tuya ผ่าน HA ไม่ได้.
-watchdog reset จึงต้อง **direct Tuya local** = อิสระจาก Pi/HA. (งานอื่นเช่นโชว์ sensor ค่อยใช้ HA REST API แยก
-ตอน Pi ยังอยู่ก็ได้ — เพิ่มทีหลัง.)
+## คุมปลั๊กยังไง: HA REST API (default) vs Tuya local
+โปรเจกต์นี้สั่งตัด-เปิดไฟผ่าน **Home Assistant REST API** (`src/ha_switch.h`) — HA คุม Tuya อยู่แล้ว เลย
+**ไม่ต้องมี Tuya local_key** (เลี่ยงเรื่อง cloud/cloudcutter ทั้งหมด). ESP32 → HTTP POST → HA → ปลั๊ก.
+
+⚠️ **กฎเหล็ก: HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด** — ถ้า HA รันบน Pi ตัวที่ถูกตัด: สั่ง OFF → Pi ดับ →
+HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้างดับถาวร**. ดังนั้น:
+- **ตอนนี้ (HA ยังบน ADS-B Pi)** → ทดสอบตัด **ปลั๊ก/switch ตัวอื่น** เท่านั้น (เช่น พัดลม/spare) ผ่าน `HA_ENTITY`
+- **watchdog จริง (ตัดปลั๊ก ADS-B Pi)** → ทำได้เมื่อ **ย้าย HA ไป Pi อีกตัว** (HA อยู่คนละเครื่อง = ตัดปลอดภัย)
+
+*(ทางเลือก: `src/tuya.h` ยังมี direct Tuya v3.3 local ถ้าอยากคุมตรงไม่พึ่ง HA — แต่ต้องมี local_key)*
 
 ## Build — PlatformIO (ไม่ใช่ Arduino IDE)
 โครง PlatformIO: `platformio.ini` + `src/main.cpp` + `src/tuya.h`. TFT_eSPI/LVGL ตั้งผ่าน **build flags**
@@ -31,8 +37,12 @@ watchdog reset จึงต้อง **direct Tuya local** = อิสระจ�
    auto-detect อาจเลือกผิดอุปกรณ์ (เช่นชน CP210x ตัวอื่น). ยืนยัน log ว่าพอร์ตถูกก่อน flash
 4. `upload_speed = 115200` (อย่าขึ้น 921600 — CH340 นี้ไม่นิ่ง)
 
-## local_key ของปลั๊ก
-`tinytuya wizard` → ได้ local_key + **ทดสอบ control บน PC ก่อน** (ดู `../watchdog-esp32/README.md`). ใช้ปลั๊ก **v3.3**.
+## ตั้ง HA (token + entity)
+1. **HA long-lived token**: HA → คลิกโปรไฟล์ (ล่างซ้าย) → เลื่อนล่างสุด → **Long-lived access tokens → Create** → ก็อปมาใส่ `HA_TOKEN`
+2. **entity_id ปลั๊ก**: HA → Developer Tools → States → หา switch ของปลั๊ก (เช่น `switch.xxx`) → ใส่ `HA_ENTITY`
+   - ⚠️ ตอนทดสอบ (HA บน ADS-B Pi) เลือก **ปลั๊กตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
+3. `HA_BASE` = `http://<ha-ip>:8123` (ตอนนี้ `192.168.41.241:8123` — เปลี่ยนเป็น Pi ใหม่ตอนย้าย HA)
+   ทดสอบ token จาก PC: `curl -H "Authorization: Bearer <token>" http://192.168.41.241:8123/api/` → ควรได้ `{"message":"API running."}`
 
 ## ตั้งค่า + flash
 ```bash
@@ -55,7 +65,7 @@ Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควร
 - **สีเพี้ยน** → ตรวจ `-DST7789_DRIVER -DTFT_RGB_ORDER=TFT_BGR -DTFT_INVERSION_OFF` ใน platformio.ini
 - **จอไม่ขึ้น** → เช็ค `TFT_BL=21` (active HIGH) + ST7789 driver + สาย micro-USB (ไม่ใช่ C-to-C)
 - **ทัชไม่ตอบ/ไม่ตรง** → touch ต้องอยู่ **VSPI** (pin 25/33/32/39/36) + rotation ตรงกับ calibration
-- **ปลั๊กไม่ขยับ** → ทดสอบ tinytuya บน PC ก่อน (ยืนยัน id/key/DP/version=3.3), เช็ค `TUYA_DP`
+- **ปลั๊กไม่ขยับ** → เช็ค `HA_TOKEN` (curl ทดสอบ), `HA_ENTITY` ตรง entity จริงใน HA, `HA_BASE` IP:port ถูก
 - **flash ผิดอุปกรณ์** → pin `upload_port` เสมอ, ยืนยันพอร์ตก่อน flash
 
 ## ชั้นป้องกันของสถานี (ตัวนี้คือชั้น 4 + มี manual)
