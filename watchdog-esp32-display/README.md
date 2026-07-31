@@ -60,9 +60,20 @@ mode: single                   # กันยิงซ้ำระหว่า�
 - ⚠️ `entity_id` = **ปลั๊กตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
 - ทดสอบจาก PC: `curl -X POST http://192.168.41.241:8123/api/webhook/<id>` → ปลั๊กควรดับแล้วติดกลับใน 60 วิ (webhook คืน 200 เสมอ)
 
+## Pi uptime จริงบนจอ (ออปชัน) — ติดตั้ง endpoint บน Pi
+บรรทัด **"Pi up"** บนจอดึง uptime จริงของ Pi จาก `adsb-uptime.service` (HTTP `:8099`, stdlib).
+ถ้ายังไม่ติดตั้งจะโชว์ `Pi up -- (info svc?)`. ติดตั้งครั้งเดียวบน Pi:
+```bash
+cd ~/adsb-station && git pull
+sudo cp systemd/adsb-uptime.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now adsb-uptime
+curl -s http://192.168.41.241:8099/          # ควรได้ตัวเลขวินาที uptime
+```
+(autoupdate จะ enable ให้เองเฉพาะ *timer* ใหม่ — service ตัวนี้ต้อง `enable` เองครั้งแรก)
+
 ## ตั้งค่า + flash
 ```bash
-cp src/config.h.example src/config.h     # แก้ WIFI_*, PI_IP, TUYA_ID/KEY/IP/DP
+cp src/config.h.example src/config.h     # แก้ WIFI_*, PI_IP, HA_WEBHOOK_CYCLE
 ```
 Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควรเห็นจอขึ้น "Pi WATCHDOG" + สถานะ
 

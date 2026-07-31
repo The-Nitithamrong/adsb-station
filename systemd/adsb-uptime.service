@@ -1,0 +1,13 @@
+[Unit]
+Description=ADS-B Pi uptime HTTP endpoint (for ESP32 display watchdog)
+After=network.target
+
+[Service]
+Type=simple
+User=arin
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/deploy/uptime_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

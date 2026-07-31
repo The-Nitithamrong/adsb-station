@@ -8,7 +8,8 @@
 
 // --- Pi ที่จะเฝ้า ---
 #define PI_IP       "192.168.41.241"
-#define PI_PORT     22          // พอร์ตที่เช็ค (22=SSH — เปิดเสมอถ้า network stack ของ Pi มีชีวิต)
+#define PI_PORT     22          // พอร์ตที่เช็ค liveness (22=SSH — เปิดเสมอถ้า network stack ของ Pi มีชีวิต)
+#define PI_INFO_PORT 8099       // พอร์ต adsb-uptime.service บน Pi — ดึง uptime จริงมาโชว์ (display-only)
 
 // --- Home Assistant Webhook (คุมปลั๊กผ่าน HA — ไม่ต้องมี token/auth) ---
 // ยิง webhook เดียว → automation เดียวใน HA ทำ turn_off → delay OFF_SECONDS → turn_on ครบวงจร
