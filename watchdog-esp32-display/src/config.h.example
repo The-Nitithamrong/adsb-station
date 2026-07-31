@@ -11,18 +11,18 @@
 #define PI_PORT     22          // พอร์ตที่เช็ค (22=SSH — เปิดเสมอถ้า network stack ของ Pi มีชีวิต)
 
 // --- Home Assistant Webhook (คุมปลั๊กผ่าน HA — ไม่ต้องมี token/auth) ---
-// สร้าง 2 automation ใน HA: webhook OFF → turn_off ปลั๊ก · webhook ON → turn_on ปลั๊ก
+// ยิง webhook เดียว → automation เดียวใน HA ทำ turn_off → delay OFF_SECONDS → turn_on ครบวงจร
+// (HA เป็นคนจับเวลา ปลั๊กเปิดกลับเองแม้ ESP32 หลุด WiFi หลังยิง)
 // ⚠️ ตอนทดสอบ (HA ยังบน ADS-B Pi) ให้ automation ตัด "ปลั๊กตัวอื่น" เท่านั้น ห้ามตัดปลั๊กของ Pi ที่รัน HA
-#define HA_WEBHOOK_OFF  "http://192.168.41.241:8123/api/webhook/xxxxxxxx-off"
-#define HA_WEBHOOK_ON   "http://192.168.41.241:8123/api/webhook/xxxxxxxx-on"
+#define HA_WEBHOOK_CYCLE  "http://192.168.41.241:8123/api/webhook/xxxxxxxx"
 
 // --- จูน ---
 #define CHECK_MS        30000UL     // เช็ค Pi ทุกกี่ ms (30 วิ)
 #define DOWN_MS         900000UL    // Pi เงียบเกินกี่ ms → auto power-cycle (900000 = 15 นาที)
-#define OFF_SECONDS     60          // ตัดไฟค้างกี่วินาที (= เวลานับถอยหลังบนจอ)
+#define OFF_SECONDS     60          // เวลานับถอยหลังบนจอ — ตั้งให้ตรงกับ delay ใน HA automation
 #define COOLDOWN_MS     1500000UL   // หลัง cycle เว้นกี่ ms ก่อน auto-cycle ใหม่ (1500000 = 25 นาที)
 #define TCP_TIMEOUT_MS  4000        // timeout ต่อการเช็ค Pi 1 ครั้ง
 
 // --- ทดสอบ ---
 #define DRY_RUN         1           // 1 = ทดสอบ UI/ปุ่ม/countdown โดยไม่ยิง HA จริง
-                                    // ตั้ง 0 เมื่อใส่ HA_WEBHOOK_OFF/ON แล้ว (ถึงจะตัด-เปิดไฟจริง)
+                                    // ตั้ง 0 เมื่อใส่ HA_WEBHOOK_CYCLE แล้ว (ถึงจะตัด-เปิดไฟจริง)

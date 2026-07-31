@@ -2,11 +2,11 @@
 //
 // 2 โหมดในเครื่องเดียว:
 //   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (15 นาที) → auto power-cycle
-//   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → OFF → นับถอยหลัง OFF_SECONDS บนจอ → ON
+//   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → ยิง 1 webhook → HA off→delay→on เอง
 //
 // วาดด้วย TFT_eSPI ตรงๆ (ไม่ใช้ LVGL — เบา RAM, ไม่มี framebuffer, block ตอน countdown ได้).
 // จอ = ST7789 บน HSPI (ตั้งใน platformio.ini) · touch = XPT2046 บน VSPI (bus แยก).
-// คุมปลั๊กผ่าน HA Webhook (ha_switch.h → haWebhook) — ไม่ต้องมี token/auth (secret อยู่ใน URL).
+// คุมปลั๊กผ่าน HA Webhook เดียว (ha_switch.h → haWebhook) — HA automation จับเวลา off→delay→on เอง.
 //
 // ⚠️ HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด — ไม่งั้นสั่ง OFF แล้ว HA ตายตาม สั่ง ON ไม่ได้ → Pi ค้างดับถาวร.
 //    ตอน HA ยังบน ADS-B Pi ให้ทดสอบกับปลั๊ก "ตัวอื่น" เท่านั้น. + ESP32 เสียบไฟคนละแหล่งกับ Pi.
@@ -140,22 +140,24 @@ void powerCycle(const char* reason) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(reason, 160, 58);
 
-  // DRY_RUN=1 → ทดสอบ UI ไม่ยิง HA จริง — โชว์ countdown ครบแต่ไม่ตัดไฟ
-  bool offOk;
+  // ยิง webhook เดียว → HA automation คุมทั้ง cycle เอง: turn_off → delay OFF_SECONDS → turn_on.
+  // แบบนี้ทน ESP32 หลุด WiFi หลังยิง: ปลั๊กเปิดกลับเองเพราะ HA เป็นคนจับเวลา ไม่ใช่ ESP32.
+  // countdown ล่างเป็นแค่ตัวโชว์บนจอ (ต้องตั้ง OFF_SECONDS ให้ตรงกับ delay ใน automation).
+  bool cycOk;
   if (DRY_RUN) {
-    offOk = true;
+    cycOk = true;
   } else {
-    offOk = false;
-    for (int i = 0; i < 3 && !offOk; i++) {          // retry เผื่อ request แรกพลาด
-      offOk = haWebhook(HA_WEBHOOK_OFF);   // ยิง webhook → HA turn_off ปลั๊ก
-      if (!offOk) delay(1500);
+    cycOk = false;
+    for (int i = 0; i < 3 && !cycOk; i++) {          // retry เผื่อ request แรกพลาด
+      cycOk = haWebhook(HA_WEBHOOK_CYCLE);   // ยิง webhook → HA off→delay→on
+      if (!cycOk) delay(1500);
     }
   }
   const char* offMsg = DRY_RUN ? "DRY RUN - no real cut"
-                               : (offOk ? "Pi OFF - power back in..." : "HA OFF FAILED - check token/entity");
+                               : (cycOk ? "Pi OFF - HA power back in..." : "HA WEBHOOK FAILED - check URL");
   for (int s = OFF_SECONDS; s > 0; s--) {            // นับถอยหลังบนจอ (block ได้ — ไม่มี LVGL ต้อง service)
     tft.fillRect(0, 90, SCREEN_W, 110, TFT_BLACK);
-    tft.setTextColor(offOk ? TFT_YELLOW : TFT_RED, TFT_BLACK);
+    tft.setTextColor(cycOk ? TFT_YELLOW : TFT_RED, TFT_BLACK);
     tft.setTextSize(6);
     char buf[8]; snprintf(buf, sizeof(buf), "%d", s);
     tft.drawString(buf, 160, 130);
@@ -167,13 +169,7 @@ void powerCycle(const char* reason) {
   tft.fillRect(0, 90, SCREEN_W, 130, TFT_BLACK);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
   tft.setTextSize(3);
-  tft.drawString("POWER ON", 160, 130);
-  if (!DRY_RUN) {
-    for (int i = 0; i < 3; i++) {
-      if (haWebhook(HA_WEBHOOK_ON)) break;   // ยิง webhook → HA turn_on ปลั๊ก
-      delay(1500);
-    }
-  }
+  tft.drawString("POWER ON", 160, 130);              // HA เปิดกลับเองแล้ว (ไม่ต้องยิง ON ซ้ำ)
   delay(2000);
   unsigned long now = millis();                      // รีเซ็ตตัวนับ — ให้ Pi boot ก่อน
   lastPiOk = now; lastCycle = now; lastCheck = now; piUp = true;
