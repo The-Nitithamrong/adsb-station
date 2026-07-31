@@ -8,7 +8,7 @@ __pycache__/
 *.pyc
 # ESP32 watchdog config (มี wifi pass + tuya local_key — อย่า commit)
 watchdog-esp32/config.py
-watchdog-esp32-display/config.h
+watchdog-esp32-display/src/config.h
 # home assistant / mosquitto runtime (config + secrets — อย่า commit)
 deploy/homeassistant/config/
 deploy/homeassistant/mosquitto/data/

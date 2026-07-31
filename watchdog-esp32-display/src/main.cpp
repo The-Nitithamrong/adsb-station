@@ -1,12 +1,15 @@
-// watchdog-esp32-display.ino — Pi power-cycle watchdog บนบอร์ด CYD (ESP32-2432S028R, จอ 2.8" + touch)
+// main.cpp — Pi power-cycle watchdog บนบอร์ด CYD2USB (Sunton ESP32-2432S028Rv3: ST7789 240x320 + XPT2046)
 //
 // 2 โหมดในเครื่องเดียว:
 //   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (15 นาที) → auto power-cycle ปลั๊ก Tuya
 //   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → Tuya OFF → นับถอยหลัง OFF_SECONDS บนจอ → Tuya ON
 //
+// วาดด้วย TFT_eSPI ตรงๆ (ไม่ใช้ LVGL — เบา RAM, ไม่มี framebuffer, block ตอน countdown ได้).
+// จอ = ST7789 บน HSPI (ตั้งใน platformio.ini) · touch = XPT2046 บน VSPI (bus แยก) · Tuya v3.3 local = tuya.h.
+//
 // ⚠️ ESP32 ต้องเสียบไฟ "คนละแหล่ง" กับ Pi (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด!) + ตั้ง power-on state ปลั๊ก = ON
-// จอ: TFT_eSPI (ตั้ง User_Setup สำหรับ CYD — ดู README) · ทัช: XPT2046 · Tuya v3.3 local: tuya.h (mbedtls)
 
+#include <Arduino.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <TFT_eSPI.h>
@@ -15,28 +18,32 @@
 #include "config.h"
 #include "tuya.h"
 
-// --- CYD (ESP32-2432S028R) touch pins (XPT2046 บน bus แยก) ---
-#define T_CS 33
-#define T_IRQ 36
-#define T_CLK 25
-#define T_MOSI 32
-#define T_MISO 39
+// --- touch XPT2046 บน VSPI (bus แยกจากจอที่อยู่ HSPI) — pin ของ CYD2USB ---
+#define XPT2046_IRQ  36
+#define XPT2046_MOSI 32
+#define XPT2046_MISO 39
+#define XPT2046_CLK  25
+#define XPT2046_CS   33
 
-// --- touch calibration (ค่า raw ~) — ปรับตามที่ Serial print ถ้าปุ่มกดไม่ตรง ---
-#define RAW_XMIN 200
-#define RAW_XMAX 3700
-#define RAW_YMIN 240
-#define RAW_YMAX 3800
+// --- touch calibration: วัดจริงบนบอร์ดนี้ที่ rotation 1 (ไม่ swap/invert) ---
+// เปลี่ยน setRotation เมื่อไหร่ = ค่าพวกนี้ใช้ไม่ได้ ต้องวัดใหม่
+#define TOUCH_X_MIN 338
+#define TOUCH_X_MAX 3676
+#define TOUCH_Y_MIN 505
+#define TOUCH_Y_MAX 3465
 
-// --- ปุ่ม RESET (landscape 320x240) ---
+static const int16_t SCREEN_W = 320;   // landscape (rotation 1)
+static const int16_t SCREEN_H = 240;
+
+// --- ปุ่ม RESET ---
 #define BTN_X 40
 #define BTN_Y 165
 #define BTN_W 240
 #define BTN_H 60
 
 TFT_eSPI tft = TFT_eSPI();
-SPIClass touchSPI(HSPI);
-XPT2046_Touchscreen ts(T_CS, T_IRQ);
+SPIClass touchSpi(VSPI);
+XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 bool wifiUp = false, piUp = true;
 unsigned long lastPiOk = 0, lastCheck = 0, lastCycle = 0, lastDraw = 0, confirmUntil = 0;
@@ -62,9 +69,9 @@ bool piAlive() {
 bool readTouch(int16_t &sx, int16_t &sy) {
   if (!ts.tirqTouched() || !ts.touched()) return false;
   TS_Point p = ts.getPoint();
-  sx = constrain(map(p.x, RAW_XMIN, RAW_XMAX, 0, 320), 0, 319);
-  sy = constrain(map(p.y, RAW_YMIN, RAW_YMAX, 0, 240), 0, 239);
-  Serial.printf("touch raw=(%d,%d) -> screen=(%d,%d)\n", p.x, p.y, sx, sy);  // ใช้ปรับ calibration
+  sx = constrain((int16_t)map(p.x, TOUCH_X_MIN, TOUCH_X_MAX, 0, SCREEN_W - 1), 0, SCREEN_W - 1);
+  sy = constrain((int16_t)map(p.y, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, SCREEN_H - 1), 0, SCREEN_H - 1);
+  Serial.printf("touch raw=(%d,%d) -> screen=(%d,%d)\n", p.x, p.y, sx, sy);
   return true;
 }
 
@@ -89,7 +96,7 @@ void drawStatic() {   // header + ปุ่ม (วาดครั้งเด�
 
 void drawDynamic() {  // สถานะ + รายละเอียด (รีเฟรช ~1 วิ, เคลียร์เฉพาะโซนกัน flicker)
   tft.fillCircle(305, 14, 6, wifiUp ? TFT_GREEN : TFT_RED);   // WiFi dot
-  tft.fillRect(0, 45, 320, 110, TFT_BLACK);
+  tft.fillRect(0, 45, SCREEN_W, 110, TFT_BLACK);
   tft.setTextDatum(MC_DATUM);
   tft.setTextSize(4);
   tft.setTextColor(piUp ? TFT_GREEN : TFT_RED, TFT_BLACK);
@@ -119,8 +126,8 @@ void powerCycle(const char* reason) {
     offOk = tuyaSet(TUYA_IP, TUYA_ID, TUYA_KEY, false, TUYA_DP);
     if (!offOk) delay(1500);
   }
-  for (int s = OFF_SECONDS; s > 0; s--) {            // นับถอยหลังบนจอ
-    tft.fillRect(0, 90, 320, 110, TFT_BLACK);
+  for (int s = OFF_SECONDS; s > 0; s--) {            // นับถอยหลังบนจอ (block ได้ — ไม่มี LVGL ต้อง service)
+    tft.fillRect(0, 90, SCREEN_W, 110, TFT_BLACK);
     tft.setTextColor(offOk ? TFT_YELLOW : TFT_RED, TFT_BLACK);
     tft.setTextSize(6);
     char buf[8]; snprintf(buf, sizeof(buf), "%d", s);
@@ -130,7 +137,7 @@ void powerCycle(const char* reason) {
     tft.drawString(offOk ? "Pi OFF - power back in..." : "TUYA OFF FAILED - check plug", 160, 190);
     delay(1000);
   }
-  tft.fillRect(0, 90, 320, 130, TFT_BLACK);
+  tft.fillRect(0, 90, SCREEN_W, 130, TFT_BLACK);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
   tft.setTextSize(3);
   tft.drawString("POWER ON", 160, 130);
@@ -146,12 +153,15 @@ void powerCycle(const char* reason) {
 // ---------- setup / loop ----------
 void setup() {
   Serial.begin(115200);
+  delay(300);
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
   tft.init();
-  tft.setRotation(1);                                // landscape 320x240
+  tft.setRotation(1);                                // landscape 320x240 (ต้องตรงกับตอน calibrate)
   tft.fillScreen(TFT_BLACK);
-  touchSPI.begin(T_CLK, T_MISO, T_MOSI, T_CS);
-  ts.begin(touchSPI);
-  ts.setRotation(1);
+  touchSpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+  ts.begin(touchSpi);
+  ts.setRotation(1);                                 // ต้องตรงกับ tft rotation
 
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);

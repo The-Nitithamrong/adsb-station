@@ -1,5 +1,5 @@
-// config.h.example — คัดลอกเป็น config.h แล้วเติมค่า
-// (config.h ไม่ขึ้น repo — อยู่ใน .gitignore เพราะมี wifi pass + tuya local_key)
+// config.h.example — คัดลอกเป็น src/config.h แล้วเติมค่า
+// (src/config.h ไม่ขึ้น repo — อยู่ใน .gitignore เพราะมี wifi pass + tuya local_key)
 #pragma once
 
 // --- WiFi (วงเดียวกับ Pi + ปลั๊ก Tuya) ---
