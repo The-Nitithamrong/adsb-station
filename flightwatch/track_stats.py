@@ -5,7 +5,7 @@
   1) coverage floor — ใกล้ VTBS แค่ไหน รับได้ต่ำสุดเท่าไหร่ + จุดสัญญาณหลุดทั่วไป
      (obs จริง: หลุด ~10nm / 2-3000ft ≈ 3 นาทีก่อนแตะพื้น)
   2) STAR gate → touchdown: เวลาจริงต่อ gate (บวก final ที่มองไม่เห็น ~last_alt/900)
-  3) arrivals ตามชั่วโมงของวัน (BKK): จำนวนเที่ยว + เวลา gate→พื้น ต่อ ชม. (ดู traffic ตามช่วงเวลา)
+  3) arrivals ตามชั่วโมงของวัน (BKK): จำนวนเที่ยว + เวลา gate→พื้น + แจกแจง gate ต่อ ชม. (traffic+ทิศทาง)
   4) ETA ที่คำนวณตอน alert vs เวลาจริงถึงพื้น — ไว้จูน ETA_DESCENT_FPM
 
 รัน:  python3 track_stats.py           # ทุกเที่ยว
@@ -96,8 +96,7 @@ def main():
         for d in arr:
             td = d["last_ts"] + (d["last_alt"] or 0) / DESCENT_FPM * 60      # touchdown ≈ last_ts + final
             by_hr.setdefault(time.gmtime(td + 7 * 3600).tm_hour, []).append(d)   # +7 ชม. = BKK
-        mx = max(len(v) for v in by_hr.values())
-        print(f"{'ชม.':>5} | {'n':>4} | {'gate→พื้น':>9} | บาร์ (เทียบ ชม.พีค)")
+        print(f"{'ชม.':>5} | {'n':>4} | {'gate→พื้น':>9} | gates (มากสุด→น้อย)")
         for h in range(24):
             ds = by_hr.get(h)
             if not ds:
@@ -105,9 +104,21 @@ def main():
             gd = [x for x in ds if x["star_ts"] and x["last_ts"] > x["star_ts"]]
             tds = [(x["last_ts"] - x["star_ts"]) / 60.0 + (x["last_alt"] or 0) / DESCENT_FPM for x in gd]
             avg = f"{statistics.median(tds):.0f}m" if tds else "-"
-            print(f"{h:02d}:00 | {len(ds):>4} | {avg:>9} | {'#' * round(len(ds) / mx * 24)}")
+            gc = {}
+            for x in ds:
+                if x["star_fix"]:
+                    gc[x["star_fix"]] = gc.get(x["star_fix"], 0) + 1
+            gates = " ".join(f"{g}:{c}" for g, c in sorted(gc.items(), key=lambda kv: -kv[1])) or "-"
+            print(f"{h:02d}:00 | {len(ds):>4} | {avg:>9} | {gates}")
         peak = max(by_hr.items(), key=lambda kv: len(kv[1]))
+        # gate รวมทั้งวัน
+        allg = {}
+        for d in arr:
+            if d["star_fix"]:
+                allg[d["star_fix"]] = allg.get(d["star_fix"], 0) + 1
+        gsum = " ".join(f"{g}:{c}" for g, c in sorted(allg.items(), key=lambda kv: -kv[1]))
         print(f"ชั่วโมงพีค: {peak[0]:02d}:00 ({len(peak[1])} เที่ยว) · รวม {len(arr)} เที่ยวที่เข้า ≤10nm")
+        print(f"gate รวมทั้งวัน: {gsum}")
     else:
         print("(ยังไม่มีเที่ยวที่เข้าใกล้ ≤10nm)")
 
