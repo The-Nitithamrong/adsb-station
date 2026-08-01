@@ -68,7 +68,7 @@ def main():
         print(f"จุดสัญญาณหลุดทั่วไป (median): {md:.0f} nm / {int(ma)} ft"
               f"  → เหลือ ~{ma / DESCENT_FPM:.1f} นาทีถึงพื้น (final ที่มองไม่เห็น)")
 
-    # 2) STAR gate — เวลาจริงจากจุดเข้า STAR ถึงพื้น (= ถึงสัญญาณหลุด + final ~last_alt/750)
+    # 2) STAR gate — เวลาจริงจากจุดเข้า STAR ถึงพื้น (= ถึงสัญญาณหลุด + final ~last_alt/DESCENT_FPM)
     gated = [d for d in data if d["star_ts"] and d["last_ts"] and d["last_ts"] > d["star_ts"]]
     print("\n=== STAR gate → touchdown: เวลาจริง (บวก final ที่มองไม่เห็น) + alt ตอนผ่าน gate ===")
     if gated:
@@ -88,8 +88,11 @@ def main():
         print("(ยังไม่มีเที่ยวที่จับจุดเข้า STAR ได้ — รอเครื่องผ่านใกล้ WILLA/NORTA/EASTE/TUMGA/LEBIM)")
 
     # 3) ARRIVALS ตามชั่วโมงของวัน (BKK) — จำนวนเที่ยว + เวลา gate→พื้น ต่อชั่วโมง
-    #    นับจากเวลาแตะพื้นโดยประมาณ (last_ts + final ที่มองไม่เห็น ~last_alt/FPM), เฉพาะที่เข้า ≤10nm = ลงจริง
-    arr = [d for d in data if d["last_ts"] and d["min_dist"] is not None and d["min_dist"] < 10]
+    #    นับจากเวลาแตะพื้นโดยประมาณ (last_ts + final ที่มองไม่เห็น ~last_alt/FPM).
+    #    กรอง "ขาลงจริง": จบ track ที่จุดต่ำสุด + ใกล้สนาม → ตัด THA ขาออก (takeoff ก็ผ่าน <10nm แต่ไต่ขึ้น)
+    arr = [d for d in data if d["last_ts"] and d["last_alt"] is not None and d["min_alt"] is not None
+           and d["last_alt"] <= d["min_alt"] + 500          # จบที่/ใกล้จุดต่ำสุด = ร่อนลง ไม่ใช่ไต่ออก
+           and d["last_dist"] is not None and d["last_dist"] < 15]
     print("\n=== Arrivals ตามชั่วโมงของวัน (BKK) — เวลาแตะพื้นโดยประมาณ ===")
     if arr:
         by_hr = {}
@@ -135,7 +138,7 @@ def main():
         diffs.append(actual - d["alert_eta"])
         print(f"{(d['flight'] or d['hex']):>8} | {d['alert_eta']:>6.0f}m | {actual:>4.0f}m | "
               f"{(d['last_dist'] or 0):>4.0f}nm/{(d['last_alt'] or 0):>5}ft")
-    print("\n'จริง≈' = alert→สัญญาณหลุด + final ที่มองไม่เห็น (~last_alt/750)")
+    print(f"\n'จริง≈' = alert→สัญญาณหลุด + final ที่มองไม่เห็น (~last_alt/{DESCENT_FPM})")
     print(f"เฉลี่ย (จริง − คำนวณ) = {statistics.mean(diffs):+.1f} นาที  "
           f"(บวก = บินจริงนานกว่าที่คำนวณ → ลด ETA_DESCENT_FPM)")
 
