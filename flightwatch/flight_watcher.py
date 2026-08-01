@@ -13,7 +13,9 @@ HOST, PORT = "127.0.0.1", 30003
 DEST_LAT, DEST_LON = 13.6900, 100.7501   # VTBS สุวรรณภูมิ (เปลี่ยนเป็นพิกัด OPC จริงได้)
 WATCH_PREFIX = "THA"                      # การบินไทย (ไม่ปน AIQ/NOK/BKP)
 ETA_ALERT_MIN = 30                        # ยิงเมื่อ ETA <= นาที
-ETA_DESCENT_FPM = 750                     # ft/min เฉลี่ยขณะ descend — ใช้ทำ ETA จากความสูง
+ETA_DESCENT_FPM = 900                     # ft/min เฉลี่ยขณะ descend — ใช้ทำ ETA จากความสูง
+#   จูนจากข้อมูลจริง 1146 เที่ยว THA (track_stats): 750 คิด ETA ยาวไปเฉลี่ย ~4.3 นาที; อัตราร่อนจริงจาก
+#   alt@STAR-gate ÷ เวลาถึงพื้น ≈ 863-969 fpm (เฉลี่ย ~890) → 900 ปิด gap ได้เกือบหมด.
 #   anchor จริง (STAR EASTE 1C RNAV เข้า VTBS): ผ่าน STAR ~16000-18000 ft → เหลือ ~20-25 นาทีถึงพื้น
 #   16000/750=21m, 18000/750=24m ✓  (dist/gs เชื่อไม่ได้: STAR ไม่บินตรง + gs ลดตอน descend)
 MAX_RANGE_NM  = 250

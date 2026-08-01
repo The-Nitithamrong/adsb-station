@@ -4,18 +4,19 @@
 ตอบ:
   1) coverage floor — ใกล้ VTBS แค่ไหน รับได้ต่ำสุดเท่าไหร่ + จุดสัญญาณหลุดทั่วไป
      (obs จริง: หลุด ~10nm / 2-3000ft ≈ 3 นาทีก่อนแตะพื้น)
-  2) STAR gate → touchdown: เวลาจริงต่อ gate (บวก final ที่มองไม่เห็น ~last_alt/750)
-  3) ETA ที่คำนวณตอน alert vs เวลาจริงถึงพื้น — ไว้จูน ETA_DESCENT_FPM
+  2) STAR gate → touchdown: เวลาจริงต่อ gate (บวก final ที่มองไม่เห็น ~last_alt/900)
+  3) arrivals ตามชั่วโมงของวัน (BKK): จำนวนเที่ยว + เวลา gate→พื้น ต่อ ชม. (ดู traffic ตามช่วงเวลา)
+  4) ETA ที่คำนวณตอน alert vs เวลาจริงถึงพื้น — ไว้จูน ETA_DESCENT_FPM
 
 รัน:  python3 track_stats.py           # ทุกเที่ยว
       python3 track_stats.py THA       # เฉพาะ callsign ขึ้นต้น THA
 stdlib ล้วน (sqlite3) — ไม่มี pip dep.
 """
-import sqlite3, sys, statistics
+import sqlite3, sys, statistics, time
 
 DB = "/home/arin/flightwatch.db"
-DESCENT_FPM = 750   # ต้องตรงกับ ETA_DESCENT_FPM ใน flight_watcher — ใช้ประมาณ "final ที่มองไม่เห็น"
-#   obs จริง: สัญญาณหลุด ~10nm / 2-3000ft ≈ 3 นาทีก่อนแตะพื้น (2500/750=3.3m ✓) → บวกกลับให้เป็นเวลาถึงพื้น
+DESCENT_FPM = 900   # ต้องตรงกับ ETA_DESCENT_FPM ใน flight_watcher — ใช้ประมาณ "final ที่มองไม่เห็น"
+#   obs จริง: สัญญาณหลุด ~10nm / 2-3000ft ≈ 3 นาทีก่อนแตะพื้น (2500/900≈2.8m ✓) → บวกกลับให้เป็นเวลาถึงพื้น
 COLS = ["hex", "flight", "watched", "first_ts", "last_ts", "samples",
         "min_dist", "alt_at_min", "min_alt", "last_dist", "last_alt",
         "max_dist", "alert_ts", "alert_eta", "star_fix", "star_alt", "star_ts"]
@@ -86,7 +87,31 @@ def main():
     else:
         print("(ยังไม่มีเที่ยวที่จับจุดเข้า STAR ได้ — รอเครื่องผ่านใกล้ WILLA/NORTA/EASTE/TUMGA/LEBIM)")
 
-    # 3) ETA คำนวณตอน alert vs เวลาจริงถึงพื้น (= alert→หลุด + final ~last_alt/750)
+    # 3) ARRIVALS ตามชั่วโมงของวัน (BKK) — จำนวนเที่ยว + เวลา gate→พื้น ต่อชั่วโมง
+    #    นับจากเวลาแตะพื้นโดยประมาณ (last_ts + final ที่มองไม่เห็น ~last_alt/FPM), เฉพาะที่เข้า ≤10nm = ลงจริง
+    arr = [d for d in data if d["last_ts"] and d["min_dist"] is not None and d["min_dist"] < 10]
+    print("\n=== Arrivals ตามชั่วโมงของวัน (BKK) — เวลาแตะพื้นโดยประมาณ ===")
+    if arr:
+        by_hr = {}
+        for d in arr:
+            td = d["last_ts"] + (d["last_alt"] or 0) / DESCENT_FPM * 60      # touchdown ≈ last_ts + final
+            by_hr.setdefault(time.gmtime(td + 7 * 3600).tm_hour, []).append(d)   # +7 ชม. = BKK
+        mx = max(len(v) for v in by_hr.values())
+        print(f"{'ชม.':>5} | {'n':>4} | {'gate→พื้น':>9} | บาร์ (เทียบ ชม.พีค)")
+        for h in range(24):
+            ds = by_hr.get(h)
+            if not ds:
+                continue
+            gd = [x for x in ds if x["star_ts"] and x["last_ts"] > x["star_ts"]]
+            tds = [(x["last_ts"] - x["star_ts"]) / 60.0 + (x["last_alt"] or 0) / DESCENT_FPM for x in gd]
+            avg = f"{statistics.median(tds):.0f}m" if tds else "-"
+            print(f"{h:02d}:00 | {len(ds):>4} | {avg:>9} | {'#' * round(len(ds) / mx * 24)}")
+        peak = max(by_hr.items(), key=lambda kv: len(kv[1]))
+        print(f"ชั่วโมงพีค: {peak[0]:02d}:00 ({len(peak[1])} เที่ยว) · รวม {len(arr)} เที่ยวที่เข้า ≤10nm")
+    else:
+        print("(ยังไม่มีเที่ยวที่เข้าใกล้ ≤10nm)")
+
+    # 4) ETA คำนวณตอน alert vs เวลาจริงถึงพื้น (= alert→หลุด + final ~last_alt/900)
     alerted = [d for d in data if d["alert_ts"] and d["alert_eta"] and d["last_ts"]]
     print("\n=== ETA ที่คำนวณตอน alert vs เวลาจริงถึงพื้น ===")
     if not alerted:

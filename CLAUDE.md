@@ -38,7 +38,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page,
   and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
 - `flightwatch/track_stats.py` — reads `tracks`: coverage floor (how low we still receive near VTBS),
-  actual STAR-gate→signal-loss time per gate, and actual vs computed ETA. `python3 track_stats.py [THA]`.
+  actual STAR-gate→signal-loss time per gate, arrivals-by-hour-of-day (BKK traffic distribution), and
+  actual vs computed ETA. `python3 track_stats.py [THA]`.
   STAR entry gates (all FL180, coords from the RNAV chart) are in `STAR_FIXES`:
   WILLA/NORTA/EASTE/TUMGA/LEBIM; a flight passing within `STAR_FIX_RADIUS_NM` is tagged with its gate.
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
@@ -172,11 +173,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 ## Roadmap (prioritized)
 1. Validate THA detection from home, then run flight_watcher as the provided systemd service.
 2. Tune inbound filter + ETA vs real THA arrivals; set DEST_LAT/LON to exact OPC coords when known.
-   ETA is now ALTITUDE-based: `alt / ETA_DESCENT_FPM` (750 ft/min avg descent), NOT straight-line
+   ETA is now ALTITUDE-based: `alt / ETA_DESCENT_FPM` (900 ft/min avg descent), NOT straight-line
    dist/gs (unreliable — STAR arrivals don't fly straight in and gs drops during descent).
-   Anchor from real ops + EASTE 1C RNAV chart: crossing the STAR at ~16000–18000 ft → ~20–25 min to
-   touchdown (16000/750≈21m, 18000/750≈24m). `tracks` + `track_stats.py` collect ground truth to
-   re-tune ETA_DESCENT_FPM. Signal isn't continuous to the ground — `alt_at_min` = lowest we still receive.
+   Anchor from real ops + EASTE 1C RNAV chart: crossing the STAR at ~16000–18000 ft → ~18–20 min to
+   touchdown (16000/900≈18m, 18000/900≈20m). Retuned 750→900 from 1146 THA tracks (track_stats): 750
+   overestimated ETA by ~4.3 min; effective alt@gate÷time ≈ 863–969 fpm (~890). `tracks` +
+   `track_stats.py` collect ground truth to re-tune. Signal isn't continuous to the ground —
+   `alt_at_min` = lowest we still receive.
 3. Add LINE OA notify alongside Telegram.
 4. ✅ Outbox forwarder (survive connectivity gaps) — `outbox.py` → Cloudflare D1 (pluggable sink;
    chose D1 over Dataverse: source is SQLite so 1:1 + bearer-token auth vs OAuth/app-registration).
