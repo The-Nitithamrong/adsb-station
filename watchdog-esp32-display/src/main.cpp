@@ -4,6 +4,8 @@
 //   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (15 นาที) → auto power-cycle
 //   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → ยิง 1 webhook → HA off→delay→on เอง
 //
+// จอสลับ 2 หน้าทุก PAGE_SWITCH_MS (5 นาที): นาฬิกา ↔ Pi status. แตะหน้านาฬิกา = ไปหน้า status ทันที
+// (ปุ่ม RESET พร้อมใช้เสมอ). การเฝ้า/auto-reset ทำงานตลอดไม่ขึ้นกับหน้าที่โชว์.
 // วาดด้วย TFT_eSPI ตรงๆ (ไม่ใช้ LVGL — เบา RAM, ไม่มี framebuffer, block ตอน countdown ได้).
 // จอ = ST7789 บน HSPI (ตั้งใน platformio.ini) · touch = XPT2046 บน VSPI (bus แยก).
 // คุมปลั๊กผ่าน HA Webhook เดียว (ha_switch.h → haWebhook) — HA automation จับเวลา off→delay→on เอง.
@@ -38,6 +40,8 @@
 static const int16_t SCREEN_W = 320;   // landscape (rotation 1)
 static const int16_t SCREEN_H = 240;
 
+#define PAGE_SWITCH_MS 300000UL         // สลับหน้า นาฬิกา ↔ Pi status ทุกกี่ ms (300000 = 5 นาที)
+
 // --- ปุ่ม RESET ---
 #define BTN_X 40
 #define BTN_Y 165
@@ -54,6 +58,11 @@ unsigned long lastPiOk = 0, lastCheck = 0, lastCycle = 0, lastDraw = 0, confirmU
 // สถานะที่วาดล่าสุด (กัน flicker: วาดใหม่เฉพาะส่วนที่เปลี่ยน — เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
 bool forceUI = true, dWifi = false, dPiUp = false;
 char dLine[64] = {0}, dLine2[64] = {0};   // dLine = บรรทัด Pi up, dLine2 = บรรทัด last check
+
+// หน้าจอ 2 หน้า สลับทุก PAGE_SWITCH_MS: 0 = Pi status (มีปุ่ม RESET) · 1 = นาฬิกา
+int page = 0;
+unsigned long lastPageSwitch = 0;
+char dClk[8] = {0}, dDate[24] = {0};      // cache หน้านาฬิกา (กัน redraw ตัวใหญ่ทุกวิ)
 
 // เวลาจริง (epoch) ของการเช็ค Pi รอบล่าสุด — โชว์ "last check HH:MM:SS" อัปเดตทุก CHECK_MS (30 วิ)
 time_t lastCheckEpoch = 0;
@@ -119,7 +128,7 @@ void drawButton(bool confirm) {
   tft.drawString(confirm ? "TAP AGAIN" : "RESET PI", BTN_X + BTN_W / 2, BTN_Y + BTN_H / 2);
 }
 
-void drawStatic() {   // header + ปุ่ม (วาดครั้งเดียว/เมื่อเปลี่ยนโหมด)
+void drawStatusStatic() {   // header + ปุ่ม (วาดครั้งเดียว/เมื่อเปลี่ยนหน้า)
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
   tft.setTextSize(2);
@@ -129,7 +138,7 @@ void drawStatic() {   // header + ปุ่ม (วาดครั้งเด�
   forceUI = true;     // หลังล้างจอ → drawDynamic วาดทุกส่วนใหม่ 1 รอบ
 }
 
-void drawDynamic() {  // วาดใหม่เฉพาะส่วนที่เปลี่ยน → ไม่ flicker (เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
+void drawStatusDynamic() {  // วาดใหม่เฉพาะส่วนที่เปลี่ยน → ไม่ flicker (เลขเปลี่ยนทุกวิ, "Pi OK" นิ่ง)
   if (forceUI || dWifi != wifiUp) {                          // WiFi dot: เปลี่ยนเฉพาะตอนสถานะเปลี่ยน
     tft.fillCircle(305, 14, 6, wifiUp ? TFT_GREEN : TFT_RED);
     dWifi = wifiUp;
@@ -184,6 +193,57 @@ void drawDynamic() {  // วาดใหม่เฉพาะส่วนที�
   forceUI = false;
 }
 
+// ---------- หน้านาฬิกา ----------
+void drawClockStatic() {   // ล้างจอ + label เล็กบนหัว (วาดครั้งเดียวตอนสลับมาหน้านี้)
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("tap = Pi status", 6, 6);
+  forceUI = true;
+  dClk[0] = dDate[0] = 0;   // บังคับวาดเวลา/วันที่ใหม่
+}
+
+void drawClockDynamic() {  // เวลาตัวใหญ่ (โคลอนกระพริบ 1 Hz) + วันที่ + สถานะ Pi เล็กๆ ล่างสุด
+  time_t e = time(nullptr);
+  bool haveClock = e > 1600000000;
+  struct tm t; localtime_r(&e, &t);
+
+  char clk[8];
+  if (haveClock) { strftime(clk, sizeof(clk), "%H:%M", &t); if (t.tm_sec % 2) clk[2] = ' '; }  // ' ' กว้างเท่า ':'
+  else           strcpy(clk, "--:--");
+  if (forceUI || strcmp(clk, dClk) != 0) {                   // เวลาตัวใหญ่: opaque bg → overwrite ไม่ flicker
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(7);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.drawString(clk, 160, 95);
+    strncpy(dClk, clk, sizeof(dClk) - 1);
+  }
+
+  char date[24];
+  if (haveClock) strftime(date, sizeof(date), "%a %d %b", &t);
+  else           strcpy(date, "waiting NTP...");
+  if (forceUI || strcmp(date, dDate) != 0) {
+    tft.fillRect(0, 150, SCREEN_W, 24, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(date, 160, 162);
+    strncpy(dDate, date, sizeof(dDate) - 1);
+  }
+
+  // สถานะ Pi เล็กๆ ล่างสุด (ยังเห็นได้ระหว่างอยู่หน้านาฬิกา) — วาด opaque ไม่ต้อง cache
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextSize(2);
+  tft.setTextColor(piUp ? TFT_GREEN : TFT_RED, TFT_BLACK);
+  tft.drawString(piUp ? "Pi OK   " : "Pi DOWN ", 160, 210);
+  forceUI = false;
+}
+
+// ---------- router: เลือกวาดตามหน้า ----------
+void drawStatic()  { if (page == 1) drawClockStatic();  else drawStatusStatic(); }
+void drawDynamic() { if (page == 1) drawClockDynamic(); else drawStatusDynamic(); }
+
 // ---------- power-cycle (ใช้ร่วมทั้ง auto + manual) ----------
 void powerCycle(const char* reason) {
   tft.fillScreen(TFT_BLACK);
@@ -229,6 +289,7 @@ void powerCycle(const char* reason) {
   unsigned long now = millis();                      // รีเซ็ตตัวนับ — ให้ Pi boot ก่อน
   lastPiOk = now; lastCycle = now; lastCheck = now; piUp = true;
   piUpSecs = -1;                                     // Pi เพิ่ง reboot → รอเช็ครอบหน้าดึง uptime ใหม่
+  page = 0; lastPageSwitch = now;                    // หลัง reset → กลับหน้า status (คนดูจะได้เห็นสถานะ)
 }
 
 // ---------- setup / loop ----------
@@ -254,15 +315,19 @@ void setup() {
   unsigned long now = millis();
   lastPiOk = now; lastCheck = 0; lastDraw = 0;
   lastCycle = now - COOLDOWN_MS;                      // ยอม auto-cycle ครั้งแรกได้เมื่อครบ DOWN_MS
+  lastPageSwitch = now;                              // เริ่มที่หน้า status → สลับหน้าแรกเมื่อครบ PAGE_SWITCH_MS
   piUp = true;
   drawStatic();
 }
 
 void loop() {
-  // --- touch (ปุ่ม RESET + ยืนยัน 2 ครั้ง) ---
+  // --- touch (หน้านาฬิกา: แตะที่ไหนก็ไปหน้า status · หน้า status: ปุ่ม RESET + ยืนยัน 2 ครั้ง) ---
   int16_t tx, ty;
   if (readTouch(tx, ty)) {
-    if (tx >= BTN_X && tx <= BTN_X + BTN_W && ty >= BTN_Y && ty <= BTN_Y + BTN_H) {
+    if (page == 1) {                                 // อยู่หน้านาฬิกา → แตะ = ไปหน้า status ทันที (ปุ่ม RESET พร้อมใช้)
+      page = 0; lastPageSwitch = millis();
+      drawStatic();
+    } else if (tx >= BTN_X && tx <= BTN_X + BTN_W && ty >= BTN_Y && ty <= BTN_Y + BTN_H) {
       if (confirmUntil && millis() < confirmUntil) { // แตะครั้งที่ 2 = ยืนยัน
         confirmUntil = 0;
         powerCycle("manual reset");
@@ -276,7 +341,14 @@ void loop() {
   }
   if (confirmUntil && millis() > confirmUntil) {     // หมดเวลายืนยัน → กลับปุ่มแดง
     confirmUntil = 0;
-    drawButton(false);
+    if (page == 0) drawButton(false);
+  }
+
+  // --- สลับหน้า นาฬิกา ↔ status ทุก PAGE_SWITCH_MS ---
+  if (millis() - lastPageSwitch >= PAGE_SWITCH_MS) {
+    lastPageSwitch = millis();
+    page ^= 1;
+    drawStatic();
   }
 
   // --- WiFi ของตัวเอง (reconnect + อย่าโทษ Pi ตอนที่เราหลุด) ---

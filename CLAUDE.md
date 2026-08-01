@@ -139,6 +139,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   pings Pi TCP:22 every 30s → silent >15 min → power-cycle; BACKUP mode = on-screen RESET button (2-tap).
   Cuts power via ONE HA webhook (HA automation does turn_off→delay→turn_on; HA must be a SEPARATE box from
   the Pi it cuts). Screen shows Pi OK/DOWN, "Pi up" (from adsb-uptime endpoint), "last check HH:MM:SS".
+  Display rotates 2 pages every `PAGE_SWITCH_MS` (5 min): clock ↔ Pi-status (the RESET-button page); tapping
+  the clock page jumps to status immediately so RESET is always reachable; monitoring runs regardless of page.
   PlatformIO build flags (no User_Setup.h); DRY_RUN=1 tests UI without firing HA. `src/config.h` gitignored.
 
 ## Runtime data contract (JSON in /run, world-readable — NOT secret)
