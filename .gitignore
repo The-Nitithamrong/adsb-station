@@ -14,3 +14,6 @@ deploy/homeassistant/config/
 deploy/homeassistant/mosquitto/data/
 deploy/homeassistant/mosquitto/log/
 deploy/homeassistant/mosquitto/config/passwd
+
+# wrangler cache/logs (Cloudflare Pages deploy) — artifact อย่า commit
+.wrangler/
