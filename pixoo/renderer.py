@@ -197,6 +197,13 @@ def draw_scanner(d, phase, color):
         d.point((x, y), fill=tuple(int(v * f) for v in color))
 
 
+def draw_nap(d):
+    """ตัวบ่งชี้ nap mode (buzzer เงียบ) — พระจันทร์เสี้ยวเล็ก มุมขวาบนสุด (พ้นเลขนาฬิกา ไม่ทับเนื้อหา)."""
+    moon = (150, 170, 220)                              # ฟ้าอมม่วงนุ่ม
+    d.ellipse([(57, 0), (63, 6)], fill=moon)            # วงเต็มมุมขวาบน
+    d.ellipse([(59, -2), (65, 4)], fill=PALETTE["bg"])  # เจาะเยื้องขวาบน → เหลือเสี้ยว
+
+
 def draw_plane(d, x, y, color):
     """เครื่องบินพิกเซล 7x7 วาดเอง"""
     for dx, dy in [(3,0),(3,1),(0,3),(1,3),(2,3),(3,3),(4,3),(5,3),(6,3),

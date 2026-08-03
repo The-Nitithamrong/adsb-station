@@ -226,6 +226,8 @@ def main():
             R.draw_status_frame(d, health)
             page(d, data)
             R.draw_scanner(d, phase, scan_col)             # ส่วนเคลื่อนไหว (ทุกหน้า)
+            if napping:
+                R.draw_nap(d)                              # 🌙z มุมขวาบน = โหมดงีบ (buzzer เงียบ)
             if ROTATE:
                 img = img.rotate(ROTATE)                   # จอติดกลับหัว → หมุนชดเชย
             try:
