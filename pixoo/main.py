@@ -30,6 +30,8 @@ COFFEE_EVERY_MIN = 60         # เตือนทุกกี่นาที (6
 COFFEE_SHOW_SEC = 30          # โชว์หน้ากาแฟนานเท่าไหร่ต่อครั้ง
 KNOCKOFF_H = 22               # เตือน "เลิกงาน" 22:00 (4 ทุ่ม) — ครั้งเดียว/วัน (เวลาเครื่อง = BKK)
 KNOCKOFF_SHOW_SEC = 60        # โชว์หน้าเลิกงานนานเท่าไหร่ (นานกว่า coffee — เตือนสำคัญ)
+NAP_BEFORE_H = 24             # nap mode: เงียบ buzzer อัตโนมัติในช่วงกี่ชม.ก่อน event ถัดไปใน Google Calendar
+#   (agenda_fetch เขียน /run/agenda/next.json) — กันปลุกตอนงีบก่อนบิน. 0 = ปิดฟีเจอร์นี้
 # Divoom PlayBuzzer ใช้ ActiveTimeInCycle/OffTimeInCycle (ไม่ใช่ PlayPulseTime/PlayOffTime — ชื่อผิด=เงียบ).
 # on 500ms / off 500ms วนจน PlayTotalTime=5000 → บี๊บเว้นจังหวะ ~5 บี๊บ ใน 5 วิ. (POST เดียว, เครื่องเล่นเอง)
 COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",
@@ -184,19 +186,23 @@ def main():
         data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
         data["throttled"] = read_throttled()               # undervoltage / thermal throttle (Pi)
 
-        # coffee break: ทุก 30 นาที (:00/:30) ช่วง 07:00–20:00 → beep + โชว์หน้ากาแฟ ~30 วิ
+        # nap mode: เงียบ buzzer อัตโนมัติในช่วง NAP_BEFORE_H ชม. ก่อน event ถัดไป (งีบก่อนบิน)
+        _ag = data.get("agenda")
+        napping = bool(NAP_BEFORE_H and _ag and 0 <= _ag.get("in_min", 1 << 30) <= NAP_BEFORE_H * 60)
+
+        # coffee break: ทุกชั่วโมง ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ (ข้ามถ้า napping)
         now_dt = datetime.datetime.now()
         mins = now_dt.hour * 60 + now_dt.minute
         slot = f"{now_dt:%Y%m%d}-{mins // COFFEE_EVERY_MIN}"
         if slot != last_slot:
-            if COFFEE_START_H * 60 <= mins <= COFFEE_END_H * 60:
+            if COFFEE_START_H * 60 <= mins <= COFFEE_END_H * 60 and not napping:
                 coffee_until = time.time() + COFFEE_SHOW_SEC
                 buzz(PIXOO_IP)
             last_slot = slot
 
-        # เลิกงาน: ครั้งเดียว/วัน เมื่อนาฬิกาถึง 22:00 → beep + โชว์หน้าเลิกงาน
+        # เลิกงาน: ครั้งเดียว/วัน เมื่อนาฬิกาถึง 22:00 → beep + โชว์หน้าเลิกงาน (ข้ามถ้า napping)
         today = f"{now_dt:%Y%m%d}"
-        if today != last_knockoff_day and mins >= knockoff_min:
+        if today != last_knockoff_day and mins >= knockoff_min and not napping:
             knockoff_until = time.time() + KNOCKOFF_SHOW_SEC
             buzz(PIXOO_IP)
             last_knockoff_day = today
