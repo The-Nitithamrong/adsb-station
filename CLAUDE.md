@@ -95,6 +95,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   stars, "TIME TO BED") for `KNOCKOFF_SHOW_SEC` and buzzes ONCE — a daily bedtime reminder. Fires once/day
   (dedup by `%Y%m%d` when minsOfDay ≥ 22:00; `last_knockoff_day` inits to today if started after 22:00 so a
   late restart doesn't re-fire). Page priority in the loop: knock_off > coffee_break > normal rotation.
+  NAP MODE: both buzzers (coffee + knock-off) are auto-silenced when the next Google Calendar event is within
+  `NAP_BEFORE_H` (24) hours — `napping = 0 ≤ agenda.in_min ≤ NAP_BEFORE_H*60` (from `/run/agenda/next.json`).
+  Lets the pilot nap before a flight without the hourly beep; set `NAP_BEFORE_H=0` to disable.
 - `agenda/agenda_fetch.py` (+ `systemd/adsb-agenda.{service,timer}`) — OPTIONAL: fetches the next Google
   Calendar event (next flight) via the calendar's **private iCal (ICS) secret URL** over HTTPS (stdlib
   urllib — NO OAuth, runs anywhere), parses the soonest upcoming VEVENT (skips RRULE/past), extracts
