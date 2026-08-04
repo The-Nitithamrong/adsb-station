@@ -53,13 +53,16 @@ def _day_start(ts):
 
 
 def summary(evs, day_start, day_end, now):
-    """(จำนวนครั้งที่เปิด, นาทีรวมที่เปิด) ในช่วง [day_start, day_end)."""
+    """(จำนวนช่วงที่เปิด, นาทีรวมที่เปิด) ในช่วง [day_start, day_end).
+    นับ "ครั้ง" = จำนวน interval ที่คาบเกี่ยววันนี้ (เปิดค้างข้ามคืน = 1 ครั้ง ไม่ใช่ 0 —
+    เดิมนับ on-event ที่ ts เป็นวันนี้ → พลาดช่วงที่เปิดมาตั้งแต่ก่อนเที่ยงคืน)."""
     end = min(day_end, now)
-    on_count = sum(1 for ts, on in evs if on and day_start <= ts < day_end)
+    on_count = 0
     on_secs = 0
     for s, e in intervals(evs, now):
         lo, hi = max(s, day_start), min(e, end)
         if hi > lo:
+            on_count += 1
             on_secs += hi - lo
     return on_count, int(on_secs // 60)
 
