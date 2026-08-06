@@ -1,0 +1,8 @@
+# fleet-cmd.sudoers — ให้ arin สั่ง restart/reboot ผ่าน fleet-cmd โดยไม่ต้องใส่รหัส (NOPASSWD)
+# ติดตั้ง: sudo install -m 440 deploy/fleet-cmd.sudoers /etc/sudoers.d/fleet-cmd
+#         sudo visudo -cf /etc/sudoers.d/fleet-cmd     # ตรวจ syntax ก่อนเชื่อใจ
+#
+# จำกัดแคบสุด: อนุญาตเฉพาะ 2 คำสั่งนี้เป๊ะ ๆ (หน่วย+ลำดับต้องตรงกับ UNITS ใน deploy/fleet-cmd).
+# ถ้าแก้ UNITS ในสคริปต์ ต้องแก้บรรทัด restart ที่นี่ให้ตรงด้วย ไม่งั้น sudo จะถาม/ปฏิเสธ.
+arin ALL=(root) NOPASSWD: /usr/bin/systemctl restart fr24feed dump1090-mutability flight-watcher pixoo
+arin ALL=(root) NOPASSWD: /usr/bin/systemctl reboot

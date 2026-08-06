@@ -1,0 +1,15 @@
+[Unit]
+Description=adsb-station fleet health-agent (Pi#1 heartbeat + LWT + cmd → fleet MQTT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arin
+EnvironmentFile=/etc/fr24-watchdog.env
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/ha/health_agent.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

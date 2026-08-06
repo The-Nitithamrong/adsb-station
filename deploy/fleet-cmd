@@ -1,0 +1,28 @@
+#!/bin/bash
+# fleet-cmd — จำกัดคำสั่งที่ peer-watchdog (Pi#2) สั่ง Pi#1 ได้ ให้เหลือแค่ 3 อย่าง.
+# ใช้ 2 ทาง — ทั้งคู่ผ่านไฟล์นี้ จุดเดียว (คำสั่งที่อนุญาตอยู่ที่เดียว แก้ที่เดียว):
+#   1) MQTT L1: health_agent.py รับ restart-services แล้วเรียก `fleet-cmd restart-services`
+#   2) SSH L2 : Pi#1 authorized_keys ผูก command="/usr/local/bin/fleet-cmd" → อ่าน $SSH_ORIGINAL_COMMAND
+# key/บัญชีรั่วก็สั่งได้แค่ restart-services|reboot|status — ทำอย่างอื่นไม่ได้.
+#
+# restart/reboot ต้องเป็น root → ผ่าน sudo (NOPASSWD เฉพาะ 2 บรรทัดนี้ ดู deploy/fleet-cmd.sudoers).
+set -uo pipefail
+
+# หน่วยที่จะ restart — ต้องตรงเป๊ะกับบรรทัดใน sudoers (แก้ที่นี่ต้องแก้ sudoers ด้วย).
+UNITS="fr24feed dump1090-mutability flight-watcher pixoo"
+
+cmd="${1:-${SSH_ORIGINAL_COMMAND:-}}"
+case "$cmd" in
+    restart-services)
+        echo "fleet-cmd: restart $UNITS"
+        exec sudo /usr/bin/systemctl restart $UNITS ;;
+    reboot)
+        echo "fleet-cmd: reboot"
+        exec sudo /usr/bin/systemctl reboot ;;
+    status)
+        # อ่านสถานะ — ไม่ต้อง root
+        /usr/bin/systemctl is-active $UNITS ;;
+    *)
+        echo "fleet-cmd: ปฏิเสธ '$cmd' (อนุญาตเฉพาะ restart-services|reboot|status)" >&2
+        exit 1 ;;
+esac

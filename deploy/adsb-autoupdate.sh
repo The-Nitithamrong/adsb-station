@@ -50,6 +50,9 @@ fi
 if grep -q '^deploy/adsb-autoupdate.sh$' <<<"$CHANGED"; then
     install -m 755 "$REPO/deploy/adsb-autoupdate.sh" /usr/local/bin/adsb-autoupdate.sh && log "self-updated (ใช้รอบหน้า)"
 fi
+if grep -q '^deploy/fleet-cmd$' <<<"$CHANGED"; then
+    install -m 755 "$REPO/deploy/fleet-cmd" /usr/local/bin/fleet-cmd && log "synced fleet-cmd"
+fi
 if grep -q '^systemd/' <<<"$CHANGED"; then
     cp "$REPO"/systemd/*.service "$REPO"/systemd/*.timer /etc/systemd/system/ && systemctl daemon-reload && log "synced unit files + daemon-reload"
     # ทุก timer ใน repo: enabled → restart รับ unit ใหม่ · disabled (รวม timer ใหม่) → enable --now ให้เอง
@@ -68,4 +71,6 @@ fi
 grep -q '^flightwatch/'             <<<"$CHANGED" && systemctl restart flight-watcher && log "restarted flight-watcher"
 grep -q '^pixoo/'                   <<<"$CHANGED" && systemctl restart pixoo          && log "restarted pixoo"
 grep -q '^deploy/uptime_server.py$' <<<"$CHANGED" && systemctl restart adsb-uptime    && log "restarted adsb-uptime"
+# health-agent รันจาก repo (ha/health_agent.py) + import shared/pylib → เปลี่ยนอย่างใดต้อง restart
+grep -qE '^(ha/health_agent\.py|shared/)' <<<"$CHANGED" && systemctl restart adsb-health-agent && log "restarted adsb-health-agent"
 exit 0
