@@ -35,7 +35,9 @@ ENV_FILE  = "/etc/fr24-watchdog.env"
 STATUS_F  = "/run/fr24-watchdog/status.json"    # เขียนโดย watchdog: {ts, health, msg_per_s, aircraft}
 REPO      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLEET_CMD = "/usr/local/bin/fleet-cmd"          # ตัวจำกัดคำสั่ง (sync โดย autoupdate); fallback = ในrepo
-STALE_STATUS_S = 90                             # status.json เก่ากว่านี้ = ถือว่า feeder ไม่ ok
+# watchdog เขียน status.json ทุก 5 นาที (fr24-watchdog.timer OnUnitActiveSec=5min) → ต้องเผื่อ.
+# 660 = 2 รอบ watchdog + margin: เก่ากว่านี้แปลว่า watchdog เองหยุดเขียน (ตายจริง) → feeder ไม่ ok.
+STALE_STATUS_S = 660
 
 
 def load_env(path):
