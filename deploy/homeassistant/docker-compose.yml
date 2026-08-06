@@ -1,22 +1,19 @@
-# Home Assistant + Mosquitto (MQTT broker) บน Pi ที่รัน ADS-B อยู่
-# ทั้งคู่ network_mode: host — HA ต้องใช้ host เพื่อ discovery/mDNS; mosquitto เปิด 1883 บน host
-# ติดตั้ง: ดู README หัวข้อ "Home Assistant + MQTT"
+# Home Assistant — รันบน Pi#2 (ArinII) ไม่ใช่ Pi#1 !
+# ⚠️ HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัดไฟ (Pi#1) — ไม่งั้นสั่งตัดแล้ว HA ตายตาม สั่งเปิดกลับไม่ได้.
+#
+# MQTT: ใช้ Mosquitto "native" บน Pi#2 (fleet broker ที่ apt install ไว้แล้ว, port 1883) ตัวเดียวกับ
+# ที่ peer-watchdog/health-agent ใช้ — ไม่รัน mosquitto ใน Docker ซ้ำ (จะชนพอร์ต 1883). HA เป็น
+# network_mode: host จึงต่อ 127.0.0.1:1883 ถึง native broker บน host ได้เลย.
+# (ดูวิธีย้ายจาก Pi#1 → Pi#2 ที่ deploy/homeassistant/MIGRATE_HA_TO_PI2.md)
 services:
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
     container_name: homeassistant
-    network_mode: host
+    network_mode: host                   # ต้อง host เพื่อ discovery/mDNS + ถึง native mosquitto ที่ 127.0.0.1
     volumes:
       - ./config:/config                 # HA config (ไม่ขึ้น repo)
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
-  mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: mosquitto
-    network_mode: host                   # เปิด listener 1883 บน host
-    volumes:
-      - ./mosquitto/config:/mosquitto/config
-      - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
-    restart: unless-stopped
+  # mosquitto: ไม่ต้องรันใน Docker บน Pi#2 — ใช้ native fleet broker (apt) แทน (pi-ha/mosquitto/fleet.conf).
+  # เก็บ config เดิม (mosquitto/config/mosquitto.conf) ไว้อ้างอิงตอนที่ยังรันบน Pi#1 เท่านั้น.

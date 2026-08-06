@@ -1,0 +1,38 @@
+# pi1-power-cycle.yaml — HA automation: รับ webhook → ตัดไฟ Pi#1 → รอ → เปิดกลับ
+# วาง: HA → Settings → Automations & Scenes → Create Automation → ⋮ → Edit in YAML → วางทับ → Save.
+# (หรือใส่ใน configuration.yaml ใต้ automation: ก็ได้)
+#
+# ยิงมาจาก 2 ที่ (webhook เดียวกัน): peer-watchdog L3 (Pi#2) และ ESP32 backstop.
+# HA คุมทั้ง cycle เอง (off → delay → on) → ผู้เรียกยิงครั้งเดียวจบ ไม่ต้องจับเวลาเอง.
+#
+# ⚠️ ต้องแก้ 2 ค่าให้ตรงกับของจริง:
+#   - webhook_id : ต้องตรงกับส่วนท้าย URL ใน HA_WEBHOOK_CYCLE (peer-watchdog env + ESP32 config.h)
+#   - entity_id  : switch ของ "ปลั๊ก Pi#1" จริง (HA → Developer Tools → States หา switch.* ของ Tuya)
+# ⚠️ ปลั๊กนี้ต้องเป็นของ Pi#1 เท่านั้น — ห้ามเป็นปลั๊กที่จ่ายไฟให้ Pi#2 (เครื่องที่รัน HA เอง)
+
+alias: "Fleet: Pi#1 power-cycle (webhook)"
+description: "รับ webhook จาก peer-watchdog L3 / ESP32 backstop → ตัดไฟ Pi#1 แล้วเปิดกลับ"
+mode: single          # กันตัดซ้อน: ถ้ามี webhook ที่ 2 เข้ามาระหว่างกำลังทำ → เมิน
+trigger:
+  - platform: webhook
+    webhook_id: "pi1_power_cycle"      # ← แก้ให้ตรง URL จริง
+    allowed_methods: [POST]
+    local_only: true                    # รับเฉพาะใน LAN (peer-watchdog/ESP32 อยู่ในวงเดียวกัน)
+action:
+  # 1) แจ้ง fleet ก่อนตัด — ให้การตัดของ ESP32/peer-watchdog โผล่ใน fleet/incident ที่เดียว
+  - service: mqtt.publish
+    data:
+      topic: "fleet/incident"
+      payload: >-
+        {"ts":"{{ now().isoformat() }}","level":"error","station":"pi-adsb","msg":"power-cut via HA webhook (peer-watchdog L3 หรือ ESP32 backstop)"}
+  # 2) ตัดไฟ
+  - service: switch.turn_off
+    target:
+      entity_id: switch.pi1_power        # ← แก้เป็นปลั๊ก Pi#1 จริง
+  # 3) รอให้ไฟหมดจริง (ตรงกับ OFF_SECONDS=60 ใน ESP32 config.h — เลขต้องตรงกัน)
+  - delay:
+      seconds: 60
+  # 4) เปิดกลับ
+  - service: switch.turn_on
+    target:
+      entity_id: switch.pi1_power
