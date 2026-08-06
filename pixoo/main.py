@@ -24,6 +24,7 @@ PUSH_FAIL_RECONNECT = 3       # push fail ติดกันกี่ครั�
 PAGE_HOLD  = 8                # กี่รอบข้อมูลต่อ 1 หน้า (1 รอบ = REFRESH วินาที)
 UPTIME_SVC = "fr24feed"       # service ที่โชว์ uptime บนหน้า UP (FDR) — เปลี่ยนเป็น flight-watcher ได้
 ROTATE     = 0                # องศาหมุนเฟรมก่อน push (จอติดกลับหัว = 180; ปกติ = 0)
+COFFEE_ENABLE  = False       # ปิด coffee break (ทั้ง buzzer + หน้ากาแฟ). True = เปิดกลับ
 COFFEE_START_H = 8            # หน้า coffee break เตือนช่วง [START:00..END:00] (เวลาเครื่อง = BKK)
 COFFEE_END_H   = 20
 COFFEE_EVERY_MIN = 60         # เตือนทุกกี่นาที (60 = ทุกชั่วโมงตรง :00)
@@ -190,15 +191,16 @@ def main():
         _ag = data.get("agenda")
         napping = bool(NAP_BEFORE_H and _ag and 0 <= _ag.get("in_min", 1 << 30) <= NAP_BEFORE_H * 60)
 
-        # coffee break: ทุกชั่วโมง ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ (ข้ามถ้า napping)
         now_dt = datetime.datetime.now()
         mins = now_dt.hour * 60 + now_dt.minute
-        slot = f"{now_dt:%Y%m%d}-{mins // COFFEE_EVERY_MIN}"
-        if slot != last_slot:
-            if COFFEE_START_H * 60 <= mins <= COFFEE_END_H * 60 and not napping:
-                coffee_until = time.time() + COFFEE_SHOW_SEC
-                buzz(PIXOO_IP)
-            last_slot = slot
+        # coffee break: ทุกชั่วโมง ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ (ข้ามถ้า napping · ปิดทั้งฟีเจอร์ด้วย COFFEE_ENABLE)
+        if COFFEE_ENABLE:
+            slot = f"{now_dt:%Y%m%d}-{mins // COFFEE_EVERY_MIN}"
+            if slot != last_slot:
+                if COFFEE_START_H * 60 <= mins <= COFFEE_END_H * 60 and not napping:
+                    coffee_until = time.time() + COFFEE_SHOW_SEC
+                    buzz(PIXOO_IP)
+                last_slot = slot
 
         # เลิกงาน: ครั้งเดียว/วัน เมื่อนาฬิกาถึง 22:00 → beep + โชว์หน้าเลิกงาน (ข้ามถ้า napping)
         today = f"{now_dt:%Y%m%d}"
