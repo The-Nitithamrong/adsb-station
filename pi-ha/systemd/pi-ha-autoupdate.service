@@ -1,0 +1,8 @@
+[Unit]
+Description=pi-ha auto-update (Pi#2: git pull origin/main + sync pi-ha units + restart changed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pi-ha-autoupdate.sh
