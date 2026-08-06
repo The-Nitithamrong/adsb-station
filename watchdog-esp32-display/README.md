@@ -11,6 +11,10 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 (หน้าที่มีปุ่ม RESET). แตะหน้านาฬิกาที่ไหนก็ได้ = เด้งไปหน้า status ทันที (ปุ่ม RESET พร้อมใช้เสมอ).
 การเฝ้า/auto-reset ทำงานตลอดไม่ว่ากำลังโชว์หน้าไหน.
 
+**ปุ่ม COFFEE** (มุมขวาบนหน้า status): แตะเพื่อ **เปิด/ปิด coffee break ของ Pixoo** — ยิงไป
+`http://<pi>:8099/coffee/toggle` (endpoint เดียวกับ uptime, `adsb-uptime.service`) → เขียนไฟล์
+`/home/arin/pixoo_coffee` ที่ `pixoo/main.py` อ่าน runtime. ต้องมี `adsb-uptime` รันบน Pi (ดูหัวข้อ Pi uptime).
+
 > เวอร์ชันไม่มีจอ (MicroPython) อยู่ที่ `../watchdog-esp32/` สำหรับ ESP32 เปล่า
 
 ## ⚠️ อ่านก่อน — ฮาร์ดแวร์เฉพาะบอร์ดนี้

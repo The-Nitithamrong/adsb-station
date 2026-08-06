@@ -48,6 +48,12 @@ static const int16_t SCREEN_H = 240;
 #define BTN_W 240
 #define BTN_H 60
 
+// --- ปุ่ม COFFEE (สลับ coffee break ของ Pixoo ผ่าน endpoint บน Pi :PI_INFO_PORT) ---
+#define CBTN_X 176
+#define CBTN_Y 26
+#define CBTN_W 138
+#define CBTN_H 28
+
 TFT_eSPI tft = TFT_eSPI();
 SPIClass touchSpi(VSPI);
 XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
@@ -69,6 +75,7 @@ time_t lastCheckEpoch = 0;
 // uptime จริงของ Pi (วินาที) ดึงจาก endpoint บน Pi ทุกรอบเช็ค — -1 = ยังไม่ได้/ดึงไม่ได้
 long piUpSecs = -1;
 unsigned long piUpAtMillis = 0;   // millis ตอนได้ค่า piUpSecs (ไว้ interpolate ระหว่างรอบเช็ค)
+int coffeeOn = -1;                // coffee break ของ Pixoo: 1=on / 0=off / -1=ยังไม่รู้ (ดึงจาก /coffee)
 
 // รูปแบบเดียวกับ Pixoo (_fmt2): 2 หน่วยบนสุด ไม่มีวินาที เช่น "3D 14H" / "14H 22M" / "22M"
 void fmtUp(char* b, size_t n, unsigned long s) {
@@ -108,6 +115,18 @@ long piUptimeS() {
   return s;
 }
 
+// GET coffee endpoint (/coffee = อ่าน state, /coffee/toggle = สลับ) → 1/0, -1 ถ้าดึงไม่ได้
+int coffeeGet(const char* path) {
+  HTTPClient http;
+  char url[64];
+  snprintf(url, sizeof(url), "http://%s:%d%s", PI_IP, PI_INFO_PORT, path);
+  if (!http.begin(url)) return -1;
+  http.setTimeout(TCP_TIMEOUT_MS);
+  int r = (http.GET() == 200) ? http.getString().toInt() : -1;
+  http.end();
+  return r;
+}
+
 // ---------- touch ----------
 bool readTouch(int16_t &sx, int16_t &sy) {
   if (!ts.tirqTouched() || !ts.touched()) return false;
@@ -128,6 +147,16 @@ void drawButton(bool confirm) {
   tft.drawString(confirm ? "TAP AGAIN" : "RESET PI", BTN_X + BTN_W / 2, BTN_Y + BTN_H / 2);
 }
 
+void drawCoffeeBtn(int st) {   // ปุ่มสลับ coffee break: 1=ON(เขียว) / 0=OFF(เทา) / -1=?(เข้ม)
+  uint16_t col = st == 1 ? TFT_DARKGREEN : (st == 0 ? 0x4208 : 0x2104);
+  tft.fillRoundRect(CBTN_X, CBTN_Y, CBTN_W, CBTN_H, 6, col);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_WHITE, col);
+  tft.setTextSize(1);
+  tft.drawString(st == 1 ? "COFFEE: ON" : (st == 0 ? "COFFEE: OFF" : "COFFEE: ?"),
+                 CBTN_X + CBTN_W / 2, CBTN_Y + CBTN_H / 2);
+}
+
 void drawStatusStatic() {   // header + ปุ่ม (วาดครั้งเดียว/เมื่อเปลี่ยนหน้า)
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
@@ -135,6 +164,7 @@ void drawStatusStatic() {   // header + ปุ่ม (วาดครั้ง�
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.drawString("Pi WATCHDOG", 6, 6);
   drawButton(confirmUntil && millis() < confirmUntil);
+  drawCoffeeBtn(coffeeOn);
   forceUI = true;     // หลังล้างจอ → drawDynamic วาดทุกส่วนใหม่ 1 รอบ
 }
 
@@ -327,6 +357,9 @@ void loop() {
     if (page == 1) {                                 // อยู่หน้านาฬิกา → แตะ = ไปหน้า status ทันที (ปุ่ม RESET พร้อมใช้)
       page = 0; lastPageSwitch = millis();
       drawStatic();
+    } else if (tx >= CBTN_X && tx <= CBTN_X + CBTN_W && ty >= CBTN_Y && ty <= CBTN_Y + CBTN_H) {
+      int r = coffeeGet("/coffee/toggle");           // แตะปุ่ม COFFEE → สลับ coffee break ของ Pixoo
+      if (r >= 0) { coffeeOn = r; drawCoffeeBtn(coffeeOn); }
     } else if (tx >= BTN_X && tx <= BTN_X + BTN_W && ty >= BTN_Y && ty <= BTN_Y + BTN_H) {
       if (confirmUntil && millis() < confirmUntil) { // แตะครั้งที่ 2 = ยืนยัน
         confirmUntil = 0;
@@ -376,6 +409,8 @@ void loop() {
           drawStatic();
         }
       }
+      int c = coffeeGet("/coffee");                  // sync สถานะ coffee break (เผื่อสลับจากที่อื่น) + redraw ถ้าเปลี่ยน
+      if (c != coffeeOn) { coffeeOn = c; if (page == 0) drawCoffeeBtn(coffeeOn); }
     }
   }
 

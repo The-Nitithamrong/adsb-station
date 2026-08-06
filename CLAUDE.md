@@ -83,7 +83,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   inject `timeout=PUSH_TIMEOUT` (+ `socket.setdefaulttimeout`) so a hung push RAISES → caught → after
   `PUSH_FAIL_RECONNECT` consecutive fails it re-creates `Pixoo()` (reconnect + reset frame counter). Now the
   display self-heals after any network blip instead of needing a manual `systemctl restart pixoo`.
-  COFFEE BREAK (`COFFEE_ENABLE`, currently OFF — set True to re-enable): every `COFFEE_EVERY_MIN` (60) in
+  COFFEE BREAK (`COFFEE_ENABLE`, currently OFF — set True to re-enable; also toggled at RUNTIME by the ESP32
+  COFFEE button → `uptime_server` writes `/home/arin/pixoo_coffee` "1"/"0", `coffee_enabled()` reads it each
+  loop, file-absent falls back to `COFFEE_ENABLE`): every `COFFEE_EVERY_MIN` (60) in
   [`COFFEE_START_H`:00..`COFFEE_END_H`:00] (08:00–20:00,
   machine=BKK) main overrides the rotation with the `coffee_break` page for `COFFEE_SHOW_SEC` and fires the
   Pixoo buzzer via `COFFEE_BUZZ` (`Device/PlayBuzzer`) — one fire-and-forget POST; the device loops
@@ -136,7 +138,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `deploy/uptime_server.py` (+ `systemd/adsb-uptime.service`) — OPTIONAL: tiny stdlib HTTP endpoint
   (`:8099`, `Type=simple` `Restart=always`) that serves the Pi's `/proc/uptime` seconds as plain text so
   the ESP32 display watchdog can show REAL Pi uptime ("Pi up 1D 4H") — it only pings TCP:22 otherwise and
-  can't read uptime. Display-only + best-effort: NOT the watchdog's liveness check (that stays TCP:22; an
+  can't read uptime. Also routes `/coffee` (read), `/coffee/toggle|on|off` (write `/home/arin/pixoo_coffee`)
+  so the ESP32 COFFEE button turns the Pixoo coffee-break on/off at runtime. Display-only + best-effort: NOT
+  the watchdog's liveness check (that stays TCP:22; an
   app-level server can crash while the Pi is fine → false reset). It's a `.service` not a `.timer`, so
   autoupdate auto-enables it (daemon service = `Type=simple`, no paired `.timer`, has `[Install]`) within
   ~1 extra cycle — no SSH needed. `systemctl mask adsb-uptime` to keep it off.
@@ -146,6 +150,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   the Pi it cuts). Screen shows Pi OK/DOWN, "Pi up" (from adsb-uptime endpoint), "last check HH:MM:SS".
   Display rotates 2 pages every `PAGE_SWITCH_MS` (5 min): clock ↔ Pi-status (the RESET-button page); tapping
   the clock page jumps to status immediately so RESET is always reachable; monitoring runs regardless of page.
+  Status page also has a COFFEE ON/OFF button (top-right) that toggles the Pixoo coffee-break via the Pi's
+  `:8099 /coffee/toggle` endpoint (polls `/coffee` each check to stay in sync).
   PlatformIO build flags (no User_Setup.h); DRY_RUN=1 tests UI without firing HA. `src/config.h` gitignored.
 
 ## Runtime data contract (JSON in /run, world-readable — NOT secret)

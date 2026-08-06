@@ -13,6 +13,7 @@ STATUS_F   = "/run/fr24-watchdog/status.json"
 THA_F      = "/run/flight-watcher/inbound.json"   # THA inbound (เขียนโดย flight_watcher.py)
 AGENDA_F   = "/run/agenda/next.json"               # เที่ยวบินถัดไป (เขียนโดย agenda_fetch.py)
 FAN_F      = "/run/adsb-ha/fan.json"                # สถานะพัดลม (เขียนโดย mqtt_publish.py)
+COFFEE_FILE = "/home/arin/pixoo_coffee"            # ปุ่ม coffee บน ESP32 เขียนผ่าน uptime_server (:8099) → runtime on/off
 STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี้ = ถือว่า stale
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 AGENDA_STALE_SEC = 6 * 3600   # agenda เก่ากว่านี้ (fetch ตายไปนาน) = ไม่โชว์
@@ -157,6 +158,14 @@ def read_fan():
         return None
 
 
+def coffee_enabled():
+    # runtime on/off จากปุ่ม ESP32 (uptime_server เขียน COFFEE_FILE) — ไฟล์หาย = ใช้ค่า COFFEE_ENABLE
+    try:
+        return open(COFFEE_FILE).read().strip() == "1"
+    except OSError:
+        return COFFEE_ENABLE
+
+
 def main():
     pixoo = Pixoo(PIXOO_IP)
     frames_per_refresh = max(1, int(REFRESH * ANIM_FPS))
@@ -193,8 +202,10 @@ def main():
 
         now_dt = datetime.datetime.now()
         mins = now_dt.hour * 60 + now_dt.minute
-        # coffee break: ทุกชั่วโมง ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ (ข้ามถ้า napping · ปิดทั้งฟีเจอร์ด้วย COFFEE_ENABLE)
-        if COFFEE_ENABLE:
+        # coffee break: ทุกชั่วโมง ช่วง 08:00–20:00 → beep + โชว์หน้ากาแฟ (ข้ามถ้า napping ·
+        # เปิด/ปิด runtime ด้วยปุ่มบน ESP32 → COFFEE_FILE; ไฟล์หาย = ใช้ค่า COFFEE_ENABLE)
+        coffee_on = coffee_enabled()
+        if coffee_on:
             slot = f"{now_dt:%Y%m%d}-{mins // COFFEE_EVERY_MIN}"
             if slot != last_slot:
                 if COFFEE_START_H * 60 <= mins <= COFFEE_END_H * 60 and not napping:
