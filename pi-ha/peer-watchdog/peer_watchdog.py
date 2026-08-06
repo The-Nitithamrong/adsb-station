@@ -187,12 +187,13 @@ class Subscriber(threading.Thread):
                     if " " not in line:
                         continue
                     topic, _, payload = line.partition(" ")
-                    self._handle(topic, payload)
+                    self._dispatch(topic, payload)
             except Exception as e:
                 print("subscriber error, retry ใน 5s:", e)
             time.sleep(5)   # sub ตาย (broker restart) → เชื่อมใหม่
 
-    def _handle(self, topic, payload):
+    def _dispatch(self, topic, payload):
+        # ห้ามใช้ชื่อ _handle — ชนกับ threading.Thread._handle (attr ใหม่ Python 3.13) → not callable
         if topic == HEALTH:
             with self._lock:
                 self.last_health = time.time()
