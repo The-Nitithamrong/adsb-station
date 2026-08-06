@@ -56,11 +56,12 @@ publish payload ว่างทับ topic เดิม.
 [`shared/pylib/fleet_mqtt.py`](../../shared/pylib/fleet_mqtt.py) — Pi#1 และ Pi#2 import ตัวเดียวกัน
 จึงไม่ drift. มี mirror อ่านง่ายที่ [`shared/contracts/mqtt.yaml`](../../shared/contracts/mqtt.yaml).
 
-## ติดตั้ง (Pi#2)
+## ติดตั้ง (Pi#2) — bootstrap ครั้งเดียว
 ```bash
-sudo apt install -y mosquitto-clients          # mosquitto_pub/sub
-git clone …/adsb-station /home/pi/adsb-station  # หรือ path ที่ใช้จริง
+sudo apt install -y git mosquitto-clients      # mosquitto_pub/sub
+git clone https://github.com/iamkkn/adsb-station /home/pi/adsb-station   # user pi
 
+cd /home/pi/adsb-station
 sudo cp pi-ha/peer-watchdog/config.env.example /etc/fleet-peer-watchdog.env
 sudo nano /etc/fleet-peer-watchdog.env         # เติม broker/ssh/HA webhook/TG — DRY_RUN=1 ไว้ก่อน
 
@@ -69,6 +70,29 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now peer-watchdog
 journalctl -u peer-watchdog -f                 # ดู ladder เดินใน DRY-RUN
 ```
+
+## ต่อ git (GitOps auto-deploy) — ทำครั้งเดียว แล้ว pull เองตลอด
+เหมือน Pi#1: ติดตั้ง `pi-ha-autoupdate` (systemd timer) ให้ Pi#2 ดึง `origin/main` เองทุก ~10 นาที
+แล้ว sync unit + restart `peer-watchdog` เมื่อ `pi-ha/` หรือ `shared/` เปลี่ยน. หลังจากนี้แก้โค้ด →
+merge เข้า main → Pi#2 อัปเดตเอง **ไม่ต้อง SSH**:
+
+```bash
+cd /home/pi/adsb-station
+sudo install -m 755 pi-ha/deploy/pi-ha-autoupdate.sh /usr/local/bin/pi-ha-autoupdate.sh
+sudo cp pi-ha/systemd/pi-ha-autoupdate.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-ha-autoupdate.timer
+journalctl -u pi-ha-autoupdate -f              # ดูรอบ pull
+```
+
+หมายเหตุ:
+- `peer_watchdog.py` รันจาก repo (import `shared/pylib` ผ่าน sys.path) → `git pull` อัปเดตโค้ดให้
+  ตรงๆ, autoupdate แค่ `systemctl restart peer-watchdog` ให้.
+- unit file (`.service`/`.timer`) `git pull` **ไม่**อัปเดต `/etc/systemd/system/` ให้ — autoupdate
+  `cp` + `daemon-reload` ให้เมื่อ `pi-ha/systemd/` เปลี่ยน (เหมือน GOTCHA ของ Pi#1).
+- service/timer ใหม่ใน `pi-ha/systemd/` ที่ยัง `disabled` → autoupdate `enable --now` ให้เอง.
+  อยากปิดตัวไหนถาวรใช้ `sudo systemctl mask <unit>`.
+- repo ต้องสะอาด (ไม่มี local edit) ไม่งั้น `merge --ff-only` ข้าม — อย่าแก้ไฟล์บน Pi#2 ตรงๆ.
 
 ### SSH forced-command ฝั่ง Pi#1 (สำหรับ L2)
 สร้าง key คู่นึงบน Pi#2 (`ssh-keygen -f ~/.ssh/fleet_id`) แล้วใส่ public key ใน Pi#1
