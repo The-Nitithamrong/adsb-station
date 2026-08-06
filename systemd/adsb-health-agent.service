@@ -7,6 +7,9 @@ Wants=network-online.target
 Type=simple
 User=arin
 EnvironmentFile=/etc/fr24-watchdog.env
+# stdout ใต้ systemd เป็น block-buffered → print ค้างไม่โผล่ใน journal จนกว่า process จบ.
+# unbuffered = log ออกเรียลไทม์ (debug ง่าย, ไม่ต้องรอ flush ตอน SIGTERM)
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/ha/health_agent.py
 Restart=always
 RestartSec=10
