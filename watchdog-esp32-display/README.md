@@ -4,7 +4,7 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 240×320 + touch XPT2046. Config นี้ **verified บนฮาร์ดแวร์จริง** (ขอบคุณ know-how ของเจ้าของบอร์ด).
 
 **2 โหมดในเครื่องเดียว:**
-- **NORMAL (อัตโนมัติ)** — เฝ้า Pi (TCP `:22`) ทุก 30 วิ. เงียบเกิน **15 นาที** → ยิง webhook power-cycle เอง
+- **NORMAL (อัตโนมัติ)** — เฝ้า Pi (TCP `:22`) ทุก 30 วิ. เงียบเกิน **20 นาที** → ยิง webhook power-cycle เอง
 - **BACKUP (มือกด)** — แตะปุ่ม **RESET PI** บนจอ (กดยืนยัน 2 ครั้ง) → ยิง **1 webhook** → HA ตัด→รอ 60 วิ→เปิดเอง
 
 **จอสลับ 2 หน้าทุก 5 นาที** (`PAGE_SWITCH_MS` ใน main.cpp): **นาฬิกา** (เวลา+วันที่ตัวใหญ่) ↔ **Pi status**
@@ -98,7 +98,7 @@ Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควร
 - **ยังไม่มี key ก็ทดสอบได้**: ตั้ง `DRY_RUN 1` (ค่าเริ่มต้นใน config) → จอ/ทัช/WiFi/เฝ้า Pi + ปุ่ม→ยืนยัน→
   countdown ทำงานครบ **โดยไม่ยิง Tuya จริง** (โชว์ "DRY RUN - no real cut"). พอได้ `TUYA_KEY` แล้วตั้ง `DRY_RUN 0`
 - **manual**: แตะ RESET PI → TAP AGAIN (ส้ม) → แตะซ้ำใน 3 วิ → (DRY_RUN=0) Tuya OFF + นับถอยหลัง 60 → ON
-- **auto**: ลด `DOWN_MS` เป็น `120000UL` (2 นาที) ชั่วคราว → ทำ Pi เข้าไม่ถึง → รอ 2 นาที → power-cycle เอง → คืน `900000UL`
+- **auto**: ลด `DOWN_MS` เป็น `120000UL` (2 นาที) ชั่วคราว → ทำ Pi เข้าไม่ถึง → รอ 2 นาที → power-cycle เอง → คืน `1200000UL`
 
 ## Troubleshooting (จาก field notes)
 - **สีเพี้ยน** → ตรวจ `-DST7789_DRIVER -DTFT_RGB_ORDER=TFT_BGR -DTFT_INVERSION_OFF` ใน platformio.ini
@@ -107,6 +107,26 @@ Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควร
 - **ปลั๊กไม่ขยับ** → curl ทดสอบ webhook (`curl -X POST .../api/webhook/<id>`), เช็ค automation ใน HA ว่า target ปลั๊กถูก + enabled
 - **flash ผิดอุปกรณ์** → pin `upload_port` เสมอ, ยืนยันพอร์ตก่อน flash
 
-## ชั้นป้องกันของสถานี (ตัวนี้คือชั้น 4 + มี manual)
+## ตำแหน่งใน pi-fleet — ESP32 คือ backstop สุดท้าย
+กู้ Pi#1 มี 3 ชั้นไม่ทับกัน (timing มาจาก `shared/pylib/fleet_mqtt.py` — SSOT เดียว):
+
+| ชั้น | ตัว | อยู่ที่ | ทำเมื่อ | ต้องพึ่ง |
+|---|---|---|---|---|
+| 1 | `fr24-watchdog` | Pi#1 | กู้ dongle ระดับแอป (L1 restart → L2 uhubctl) | Pi#1 ยังปกติ |
+| 2 | `peer-watchdog` | Pi#2 | เงียบ → L1 MQTT → L2 ssh → **L3 ตัดไฟ 600s** + รอ 240s | Pi#2 + broker + MQTT healthy |
+| 3 | **ESP32 (ตัวนี้)** | แยกเครื่อง | TCP:22 เงียบ **20 นาที** → ตัดไฟ + ปุ่มมือ | **ไม่พึ่งอะไรเลย** |
+
+**ทำไม 20 นาที ไม่ใช่ 15:** peer-watchdog (ชั้น 2) ตัดไฟที่ 600s + รอ 240s + Pi boot ~120s ≈ **16 นาที**.
+ESP32 ที่ 15 นาทีจะยิง**ซ้อน**ตอน Pi กำลัง boot จากการตัดของชั้น 2. เลื่อนเป็น 20 นาที → ESP32 ยิงเฉพาะเมื่อ
+ชั้น 2 ลองครบแล้วเอาไม่อยู่ **หรือ** Pi#2/broker เองก็ตาย (ชั้น 2 ทำอะไรไม่ได้เลย → ESP32 เป็นทางเดียวที่กู้ได้).
+ESP32 **ตั้งใจไม่พึ่ง MQTT** — จะได้กู้ได้แม้ทั้ง fleet ล่ม.
+
+**ให้การตัดไฟของ ESP32 โผล่ใน `fleet/incident`** (โดยไม่ต้องแตะโค้ด ESP32): ใน HA automation ที่รับ
+webhook power-cycle เพิ่ม action `mqtt.publish` topic `fleet/incident` ก่อนตัดไฟ เช่น
+`{"level":"error","station":"pi-adsb","msg":"power-cut via HA webhook (peer-watchdog L3 หรือ ESP32 backstop)"}`.
+แยกว่าใครสั่ง: ถ้า peer-watchdog เป็นคนตัด มันจะ log incident ของตัวเอง**ก่อน**เรียก webhook อยู่แล้ว →
+เห็น incident ของ peer-watchdog คู่กับของ HA = ชั้น 2 สั่ง; เห็นแต่ของ HA เดี่ยวๆ = **ESP32 สั่ง**.
+
+### รวมชั้นป้องกันทั้งหมดของสถานี
 1. ปิด router scheduled-reboot 03:00 · 2. เดินสาย LAN เข้า Pi · 3. internal HW watchdog (CPU lockup)
-4. **ESP32 display watchdog (ตัวนี้)** — auto จับ full hang + ปุ่มกด reset มือได้ทุกเมื่อ
+4. fr24-watchdog (แอป) · 5. peer-watchdog (Pi#2) · 6. **ESP32 (ตัวนี้)** — backstop + ปุ่มมือทุกเมื่อ

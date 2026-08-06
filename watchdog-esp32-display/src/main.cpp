@@ -1,7 +1,7 @@
 // main.cpp — Pi power-cycle watchdog บนบอร์ด CYD2USB (Sunton ESP32-2432S028Rv3: ST7789 240x320 + XPT2046)
 //
 // 2 โหมดในเครื่องเดียว:
-//   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (15 นาที) → auto power-cycle
+//   NORMAL — เฝ้า Pi (TCP :22) ทุก CHECK_MS. เงียบเกิน DOWN_MS (20 นาที) → auto power-cycle
 //   BACKUP — แตะปุ่ม "RESET PI" บนจอ (กดยืนยัน 2 ครั้ง) → ยิง 1 webhook → HA off→delay→on เอง
 //
 // จอสลับ 2 หน้าทุก PAGE_SWITCH_MS (5 นาที): นาฬิกา ↔ Pi status. แตะหน้านาฬิกา = ไปหน้า status ทันที
@@ -12,6 +12,15 @@
 //
 // ⚠️ HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด — ไม่งั้นสั่ง OFF แล้ว HA ตายตาม สั่ง ON ไม่ได้ → Pi ค้างดับถาวร.
 //    ตอน HA ยังบน ADS-B Pi ให้ทดสอบกับปลั๊ก "ตัวอื่น" เท่านั้น. + ESP32 เสียบไฟคนละแหล่งกับ Pi.
+//
+// ตำแหน่งใน pi-fleet (3 ชั้นกู้ Pi#1 ไม่ทับกัน — ดู shared/pylib/fleet_mqtt.py):
+//   1) fr24-watchdog (บน Pi#1)       — กู้ dongle ระดับแอปตอน Pi#1 ยังปกติ
+//   2) peer-watchdog (บน Pi#2, MQTT) — L3 ตัดไฟที่ 600s + รอ 240s → เสร็จ ~14 นาที + boot ~16 นาที
+//   3) ESP32 (ตัวนี้, ไม่พึ่ง MQTT)  — backstop สุดท้าย: ยิงที่ DOWN_MS=20 นาที = "หลัง" ชั้น 2 ลองครบ
+//      แล้วเอาไม่อยู่ — หรือกรณีที่ Pi#2/broker เองก็ตาย (ชั้น 2 ทำอะไรไม่ได้เลย) ESP32 เป็นทางเดียวที่กู้ได้.
+//      ∴ DOWN_MS ต้อง > POWER_CYCLE_S(600)+POST_POWER_WAIT_S(240)+boot ไม่งั้นยิงซ้อนตอน Pi กำลัง boot.
+//   ESP32 คง "ไม่พึ่ง MQTT" ตั้งใจ (จะได้กู้ได้แม้ทั้ง fleet ล่ม). ให้ action โผล่ใน fleet/incident โดย
+//   ฝั่ง HA (automation ที่รับ webhook) publish incident แทน — ไม่ต้องแตะโค้ด ESP32 (ดู README).
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -405,7 +414,7 @@ void loop() {
       } else {
         piUpSecs = -1;                               // Pi ดับ → uptime ไม่รู้
         if (millis() - lastPiOk >= DOWN_MS && millis() - lastCycle >= COOLDOWN_MS) {
-          powerCycle("no signal 15m");
+          powerCycle("no signal (backstop)");
           drawStatic();
         }
       }

@@ -19,7 +19,10 @@
 
 // --- จูน ---
 #define CHECK_MS        30000UL     // เช็ค Pi ทุกกี่ ms (30 วิ)
-#define DOWN_MS         900000UL    // Pi เงียบเกินกี่ ms → auto power-cycle (900000 = 15 นาที)
+// DOWN_MS = threshold ของ ESP32 (ชั้นที่ 3, backstop สุดท้าย). ต้อง "หลัง" peer-watchdog (Pi#2)
+// ลองครบ: L3 ตัดไฟที่ POWER_CYCLE_S=600s + รอ POST_POWER_WAIT_S=240s + Pi boot ~120s ≈ 16 นาที.
+// ตั้ง 20 นาที = เผื่อ margin ไม่ยิงซ้อนตอน Pi กำลัง boot จากการตัดของชั้น 2. (ดู shared/pylib/fleet_mqtt.py)
+#define DOWN_MS         1200000UL   // Pi เงียบเกินกี่ ms → auto power-cycle (1200000 = 20 นาที)
 #define OFF_SECONDS     60          // เวลานับถอยหลังบนจอ — ตั้งให้ตรงกับ delay ใน HA automation
 #define COOLDOWN_MS     1500000UL   // หลัง cycle เว้นกี่ ms ก่อน auto-cycle ใหม่ (1500000 = 25 นาที)
 #define TCP_TIMEOUT_MS  4000        // timeout ต่อการเช็ค Pi 1 ครั้ง
