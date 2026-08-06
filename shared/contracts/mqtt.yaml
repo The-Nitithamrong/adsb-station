@@ -1,0 +1,36 @@
+# mqtt.yaml — mirror อ่านง่ายของ shared/pylib/fleet_mqtt.py (โค้ดคือ SSOT จริง แก้ที่ .py แล้ว sync ที่นี่).
+version: 1
+
+topics:
+  adsb_status:      "fleet/pi-adsb/status"        # retained, LWT "online"|"offline"
+  adsb_health:      "fleet/pi-adsb/health"        # NOT retained, ทุก 30s
+  adsb_maintenance: "fleet/pi-adsb/maintenance"   # retained, JSON w/ expiry
+  adsb_cmd:         "fleet/pi-adsb/cmd"           # peer-watchdog → Pi#1
+  ha_status:        "fleet/pi-ha/status"
+  deploy_log:       "fleet/deploy/log"
+  incident:         "fleet/incident"
+
+timings:
+  heartbeat_interval_s:  30
+  health_stale_s:        120     # L0 log
+  soft_restart_s:        180     # L1 MQTT cmd
+  ssh_action_s:          300     # L2 SSH restart → reboot
+  power_cycle_s:         600     # L3 Tuya cut — ONLY if ping+ssh both dead
+  post_power_wait_s:     240
+  cooldown_after_fail_s: 21600   # 6h then alert-only
+
+limits:
+  max_reboots_per_24h:      4
+  max_power_cycles_per_24h: 2
+  min_seconds_between_power_cycles: 900
+
+health_payload_schema:
+  ts:                "ISO8601 UTC"
+  commit:            "git short SHA currently deployed"
+  uptime_s:          "int"
+  fr24_feed_ok:      "bool — real data flow on 30003, not just process alive"
+  pixoo_ok:          "bool"
+  flight_watcher_ok: "bool"
+
+# maintenance payload: {"until": "2026-08-06T12:34:00Z", "reason": "deploy a1b2c3d"}
+# watchdog honours flag ONLY while now < until (self-expiry — ไม่ค้างปิด watchdog ถาวร)

@@ -1,0 +1,18 @@
+[Unit]
+Description=fleet peer-watchdog (Pi#2 เฝ้า Pi#1 ผ่าน MQTT + escalation ladder)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+EnvironmentFile=/etc/fleet-peer-watchdog.env
+# รันจาก repo (import shared/pylib ผ่าน sys.path ในสคริปต์) — path ปรับตามที่ clone จริงบน Pi#2
+ExecStart=/usr/bin/python3 /home/pi/adsb-station/pi-ha/peer-watchdog/peer_watchdog.py
+# state.json (โควตา reboot/power-cycle) อยู่ใต้ /var/lib/fleet — ต้องอยู่รอดข้าม restart
+StateDirectory=fleet
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
