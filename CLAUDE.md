@@ -110,9 +110,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `systemd/*` — unit files for each service.
 - `ha/mqtt_publish.py` (+ `systemd/adsb-ha-mqtt.{service,timer}`, `deploy/homeassistant/`) — OPTIONAL:
   publishes /run status+inbound to MQTT with Home Assistant discovery (retained config + state) every
-  1 min via `mosquitto_pub` (apt mosquitto-clients; stdlib only). HA + Mosquitto run as Docker
-  containers (`deploy/homeassistant/docker-compose.yml`). MQTT creds (`MQTT_HOST/PORT/USER/PASS`) in
-  /etc/fr24-watchdog.env. Sensors: feeder health/rate/aircraft, **CPU temp** (unit °C, state_class
+  1 min via `mosquitto_pub` (apt mosquitto-clients; stdlib only). HA runs as a Docker container
+  (`deploy/homeassistant/docker-compose.yml`) — MOVING Pi#1 → **Pi#2 (ArinII)** so it can safely
+  power-cycle Pi#1 (HA on the box it cuts = can't turn itself back on). On Pi#2 it uses the **native
+  fleet Mosquitto** (apt, `pi-ha/mosquitto/fleet.conf`) as the single broker for BOTH fleet topics and
+  HA discovery — no Docker mosquitto (port clash). Migration runbook: `deploy/homeassistant/MIGRATE_HA_TO_PI2.md`.
+  MQTT creds (`MQTT_HOST/PORT/USER/PASS`, user `adsb`) in /etc/fr24-watchdog.env — `MQTT_HOST` = Pi#2 IP
+  after the move. Sensors: feeder health/rate/aircraft, **CPU temp** (unit °C, state_class
   measurement — NO device_class temperature on purpose: device_class makes HA convert °C↔°F by unit
   system, which can revert/override on HA config corruption and silently break the numeric_state fan
   automation; raw °C = stable),
