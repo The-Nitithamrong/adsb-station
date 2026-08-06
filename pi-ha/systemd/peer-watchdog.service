@@ -5,10 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
+User=arin
 EnvironmentFile=/etc/fleet-peer-watchdog.env
-# รันจาก repo (import shared/pylib ผ่าน sys.path ในสคริปต์) — path ปรับตามที่ clone จริงบน Pi#2
-ExecStart=/usr/bin/python3 /home/pi/adsb-station/pi-ha/peer-watchdog/peer_watchdog.py
+# รันจาก repo (import shared/pylib ผ่าน sys.path ในสคริปต์). Pi#2 (ArinII) ใช้ user arin /
+# /home/arin เหมือน Pi#1 — clone repo ไว้ที่นี่. clone ที่อื่นให้แก้ path บรรทัดล่างตาม.
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/pi-ha/peer-watchdog/peer_watchdog.py
 # state.json (โควตา reboot/power-cycle) อยู่ใต้ /var/lib/fleet — ต้องอยู่รอดข้าม restart
 StateDirectory=fleet
 Restart=always

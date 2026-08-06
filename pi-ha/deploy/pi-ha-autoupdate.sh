@@ -11,8 +11,8 @@
 # git ทำในนามเจ้าของ repo (pi) ผ่าน runuser; ส่วน cp/systemctl ทำเป็น root.
 set -uo pipefail
 
-REPO="${PIHA_REPO:-/home/pi/adsb-station}"
-RUN_AS="${PIHA_RUN_AS-runuser -u pi --}"   # override เป็น "" ตอนทดสอบ (รัน git ตรงๆ)
+REPO="${PIHA_REPO:-/home/arin/adsb-station}"   # Pi#2 (ArinII) ใช้ user arin เหมือน Pi#1
+RUN_AS="${PIHA_RUN_AS-runuser -u arin --}"     # override เป็น "" ตอนทดสอบ (รัน git ตรงๆ)
 gitc() { $RUN_AS git -C "$REPO" "$@"; }
 log()  { echo "$(date '+%F %T') $*"; }
 
@@ -35,7 +35,7 @@ REMOTE="$(gitc rev-parse origin/main)"
 
 if ! gitc merge --ff-only --quiet origin/main; then
     log "WARN: ff-only ไม่ได้ (repo มี local changes/diverged) — ข้าม auto-update"
-    log "      เคลียร์: sudo -u pi git -C $REPO status  (แล้ว stash/checkout ให้สะอาด)"
+    log "      เคลียร์: sudo -u arin git -C $REPO status  (แล้ว stash/checkout ให้สะอาด)"
     exit 0
 fi
 AFTER="$(gitc rev-parse HEAD)"

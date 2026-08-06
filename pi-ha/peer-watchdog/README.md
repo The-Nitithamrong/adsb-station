@@ -59,9 +59,9 @@ publish payload ว่างทับ topic เดิม.
 ## ติดตั้ง (Pi#2) — bootstrap ครั้งเดียว
 ```bash
 sudo apt install -y git mosquitto-clients      # mosquitto_pub/sub
-git clone https://github.com/iamkkn/adsb-station /home/pi/adsb-station   # user pi
+git clone https://github.com/iamkkn/adsb-station /home/arin/adsb-station   # user arin (Pi#2 = ArinII)
 
-cd /home/pi/adsb-station
+cd /home/arin/adsb-station
 sudo cp pi-ha/peer-watchdog/config.env.example /etc/fleet-peer-watchdog.env
 sudo nano /etc/fleet-peer-watchdog.env         # เติม broker/ssh/HA webhook/TG — DRY_RUN=1 ไว้ก่อน
 
@@ -77,7 +77,7 @@ journalctl -u peer-watchdog -f                 # ดู ladder เดินใ�
 merge เข้า main → Pi#2 อัปเดตเอง **ไม่ต้อง SSH**:
 
 ```bash
-cd /home/pi/adsb-station
+cd /home/arin/adsb-station
 sudo install -m 755 pi-ha/deploy/pi-ha-autoupdate.sh /usr/local/bin/pi-ha-autoupdate.sh
 sudo cp pi-ha/systemd/pi-ha-autoupdate.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
