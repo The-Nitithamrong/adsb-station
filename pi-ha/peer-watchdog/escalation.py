@@ -17,7 +17,7 @@ DRY_RUN = os.environ.get("DRY_RUN", "1") == "1"
 
 PI1_IP   = os.environ.get("PI1_IP", "192.168.41.241")
 SSH_USER = os.environ.get("SSH_USER", "arin")
-SSH_KEY  = os.environ.get("SSH_KEY", "/home/pi/.ssh/fleet_id")
+SSH_KEY  = os.environ.get("SSH_KEY", "/home/arin/.ssh/fleet_id")
 SSH_PORT = int(os.environ.get("SSH_PORT", "22"))
 
 
