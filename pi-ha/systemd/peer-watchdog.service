@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 User=arin
 EnvironmentFile=/etc/fleet-peer-watchdog.env
+# stdout ใต้ systemd เป็น block-buffered → log ค้างไม่โผล่ทันที. unbuffered = ออกเรียลไทม์
+Environment=PYTHONUNBUFFERED=1
 # รันจาก repo (import shared/pylib ผ่าน sys.path ในสคริปต์). Pi#2 (ArinII) ใช้ user arin /
 # /home/arin เหมือน Pi#1 — clone repo ไว้ที่นี่. clone ที่อื่นให้แก้ path บรรทัดล่างตาม.
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/pi-ha/peer-watchdog/peer_watchdog.py
