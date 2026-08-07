@@ -68,6 +68,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   and retry (survives connectivity gaps). D1 side: `uid` PK + `INSERT OR IGNORE` = idempotent on
   re-send. Pluggable — add a sink `send(table,cols,rows)->count` to `SINKS` (e.g. Dataverse later).
   D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
+- `report/inbound_push.py` (+ `systemd/adsb-inbound-push.service`) — OPTIONAL: pushes the LIVE THA
+  inbound + ETA (from `/run/flight-watcher/inbound.json`) to Cloudflare D1 table `inbound_now` every
+  ~30s so an EXTERNAL web app can show real-time ETA. Differs from outbox (history: append rows) —
+  this keeps ONE current row per station (`station` PK + `INSERT OR REPLACE` = latest value only,
+  `flight`=NULL when no inbound). `push_ts` lets the web side detect staleness. Daemon (Type=simple,
+  reuses the same `D1_*` creds + push pattern as heartbeat/outbox; stdlib). Create `inbound_now` once
+  (`INBOUND_SCHEMA` at file end). Web app reads via a Pages D1 binding — `SELECT * FROM inbound_now`.
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `uptime`,
   `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotation via `ROTATE` in main
