@@ -6,7 +6,13 @@ After=network-online.target
 Type=simple
 User=arin
 Environment=PYTHONUNBUFFERED=1
+# ICS URL อยู่ในไฟล์ env (อย่าคอมมิต — เป็น secret): ใส่ TIMETABLE_ICS_URL หรือ GCAL_ICS_URL
+# ทั้งสองไฟล์ optional (`-`) — วางที่ไหนก็ได้ที่มีไฟล์นั้น
+EnvironmentFile=-/etc/adsb-timetable.env
+EnvironmentFile=-/etc/fr24-watchdog.env
 # Environment=TIMETABLE_PORT=8080
+# Environment=TIMETABLE_DAY_START=8
+# Environment=TIMETABLE_DAY_END=20
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/pi-ha/timetable/kiosk_server.py
 Restart=always
 RestartSec=5
