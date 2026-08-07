@@ -1,0 +1,38 @@
+{
+  "title": "ตารางเรียน",
+  "student": "",
+  "days": ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์"],
+  "periods": [
+    { "label": "คาบ 1", "start": "08:30", "end": "09:20" },
+    { "label": "คาบ 2", "start": "09:20", "end": "10:10" },
+    { "label": "คาบ 3", "start": "10:30", "end": "11:20" },
+    { "label": "คาบ 4", "start": "11:20", "end": "12:10" },
+    { "label": "พักเที่ยง", "start": "12:10", "end": "13:00", "break": true },
+    { "label": "คาบ 5", "start": "13:00", "end": "13:50" },
+    { "label": "คาบ 6", "start": "13:50", "end": "14:40" },
+    { "label": "คาบ 7", "start": "15:00", "end": "15:50" }
+  ],
+  "subjects": {
+    "math":  { "name": "คณิตศาสตร์",  "emoji": "🔢", "color": "#3b82f6" },
+    "thai":  { "name": "ภาษาไทย",     "emoji": "📖", "color": "#ef4444" },
+    "eng":   { "name": "ภาษาอังกฤษ",  "emoji": "🔤", "color": "#14b8a6" },
+    "sci":   { "name": "วิทยาศาสตร์",  "emoji": "🔬", "color": "#a855f7" },
+    "art":   { "name": "ศิลปะ",       "emoji": "🎨", "color": "#f97316" },
+    "soc":   { "name": "สังคมศึกษา",   "emoji": "🌏", "color": "#22c55e" },
+    "pe":    { "name": "พลศึกษา",     "emoji": "⚽", "color": "#eab308" },
+    "music": { "name": "ดนตรี",       "emoji": "🎵", "color": "#ec4899" },
+    "comp":  { "name": "คอมพิวเตอร์",  "emoji": "💻", "color": "#64748b" },
+    "lunch": { "name": "พักเที่ยง",    "emoji": "🍚", "color": "#94a3b8" },
+    "home":  { "name": "โฮมรูม",      "emoji": "🏫", "color": "#0ea5e9" }
+  },
+  "grid": [
+    ["home", "math", "thai", "eng",  "sci"],
+    ["math", "sci",  "math", "thai", "eng"],
+    ["thai", "eng",  "sci",  "math", "soc"],
+    ["eng",  "soc",  "art",  "comp", "math"],
+    ["lunch","lunch","lunch","lunch","lunch"],
+    ["sci",  "math", "pe",   "art",  "thai"],
+    ["soc",  "thai", "music","pe",   "comp"],
+    ["art",  "comp", "eng",  "music","pe"]
+  ]
+}

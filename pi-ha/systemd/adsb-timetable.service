@@ -1,0 +1,15 @@
+[Unit]
+Description=ตารางเรียน kiosk server (Pi#2 — serves timetable HTML for Chromium kiosk)
+After=network-online.target
+
+[Service]
+Type=simple
+User=arin
+Environment=PYTHONUNBUFFERED=1
+# Environment=TIMETABLE_PORT=8080
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/pi-ha/timetable/kiosk_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
