@@ -21,7 +21,6 @@ config/secrets ใน /etc/fr24-watchdog.env: BROKER_HOST/PORT/USER/PASS (broker
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import threading
