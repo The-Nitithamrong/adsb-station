@@ -71,6 +71,14 @@ def d1_query(sql, params):
         raise RuntimeError(f"D1 error: {resp.get('errors')}")
 
 
+def ensure_table():
+    """สร้างตาราง D1 เองครั้งเดียว (best-effort) — ไม่ต้องใช้ wrangler แยก."""
+    for stmt in INBOUND_SCHEMA.split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            d1_query(stmt, [])
+
+
 def push(rows):
     """แทนที่ชุด inbound ปัจจุบันของสถานีใน D1 แบบไม่มีช่องว่าง (upsert ก่อน แล้วลบตัวเก่า)."""
     now = int(time.time())
@@ -98,8 +106,13 @@ def main():
     signal.signal(signal.SIGTERM, _term)
     signal.signal(signal.SIGINT, _term)
     log(f"เริ่มทำงาน — ยิง inbound_all → D1 inbound_live ทุก {PUSH_INTERVAL_S}s (station={STATION})")
+    table_ready = False
     while not _stop:
         try:
+            if not table_ready:              # สร้างตารางเอง — ลองซ้ำจนสำเร็จ (กันเน็ตหลุดตอน boot)
+                ensure_table()
+                table_ready = True
+                log("ตาราง inbound_live พร้อม")
             push(read_inbound_all())
         except (urllib.error.URLError, OSError, RuntimeError, TimeoutError) as e:
             log("ส่ง D1 ไม่สำเร็จ (เน็ตหลุด?) — ข้ามรอบนี้:", e)   # ไม่ crash รอบหน้าค่อยส่งใหม่
