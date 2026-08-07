@@ -3,7 +3,7 @@
 
 log เขียนโดย mqtt_publish (ทุกครั้งที่ switch on↔off, ความละเอียด ~1 นาทีตาม timer).
 รัน:  python3 fan_stats.py [วันย้อนหลัง=7]      · stdlib ล้วน.
-`today_stats()` ถูก import โดย daily_status.py ใส่บรรทัดพัดลมในข้อความ 09:00.
+`last24h_stats()` ถูก import โดย daily_status.py ใส่บรรทัดพัดลมในข้อความ 09:00 (ช่วง 24 ชม.ล่าสุด).
 """
 import datetime
 import json
@@ -67,10 +67,11 @@ def summary(evs, day_start, day_end, now):
     return on_count, int(on_secs // 60)
 
 
-def today_stats(now=None):
+def last24h_stats(now=None):
+    """พัดลมในช่วง 24 ชม.ล่าสุด (now-24ชม. → now). digest 09:00 = 09:00 เมื่อวาน → 09:00 วันนี้
+    (เห็นการใช้ทั้งวัน+คืนที่ผ่านมา แทน 'ตั้งแต่เที่ยงคืน' ที่ 09:00 ครอบแค่ 9 ชม.)."""
     now = int(now or time.time())
-    ds = _day_start(now)
-    return summary(read_events(), ds, ds + 86400, now)
+    return summary(read_events(), now - 86400, now, now)
 
 
 def main():
