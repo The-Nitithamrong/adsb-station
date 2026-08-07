@@ -1,0 +1,16 @@
+[Unit]
+Description=adsb-station push live THA inbound + ETA to Cloudflare D1 (for external web app)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arin
+EnvironmentFile=/etc/fr24-watchdog.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/report/inbound_push.py
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
