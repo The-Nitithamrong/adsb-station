@@ -123,10 +123,10 @@ def build_message():
     fan_line = ""
     try:
         import fan_stats
-        fc, fm = fan_stats.today_stats()
+        fc, fm = fan_stats.last24h_stats()
         h, mm = divmod(fm, 60)
         dur = f"{h}ชม {mm}น" if h else f"{mm}น"
-        fan_line = f"\n🌀 พัดลมวันนี้: {fc} ครั้ง · รวม {dur}"
+        fan_line = f"\n🌀 พัดลม 24ชม: {fc} ครั้ง · รวม {dur}"
     except Exception:
         pass
     return (
