@@ -256,6 +256,22 @@ def current_inbound():
                     "gs": p.get("gs"), "hex": hexid, "ts": time.time()}
     return best
 
+def all_inbound(limit=30):
+    """ทุกเครื่อง (ทุกสายการบิน) ที่กำลัง inbound เข้า VTBS ตอนนี้ + ETA เรียงใกล้ถึงก่อน.
+    เหมือน current_inbound แต่ไม่กรอง THA — ป้อน inbound_push (web app ภายนอกที่อยากได้ทุกสาย)."""
+    out = []
+    for hexid, p in flights.items():
+        if p.get("dist") is None or p["dist"] > MAX_RANGE_NM or not is_inbound(p):
+            continue
+        e = eta_min(p)
+        if e is None or e > INBOUND_MAX_MIN:
+            continue
+        out.append({"flight": p.get("callsign", "").strip() or hexid.upper(), "hex": hexid,
+                    "eta_min": round(e, 1), "dist_nm": round(p["dist"], 1),
+                    "alt": p.get("alt"), "gs": p.get("gs")})
+    out.sort(key=lambda x: x["eta_min"])
+    return out[:limit]
+
 def flights_list():
     """ทุกเครื่องที่มี position ตอนนี้ เรียงใกล้→ไกล (สำหรับหน้า list บน Pixoo)"""
     out = []
@@ -274,6 +290,7 @@ def write_inbound():
     lst = flights_list()
     data["nrx"] = len(lst)               # จำนวนเครื่องที่รับได้ทั้งหมด
     data["list"] = lst[:LIST_MAX]        # เฉพาะที่โชว์บนจอ
+    data["inbound_all"] = all_inbound()  # ทุกสายการบินที่ inbound + ETA (ป้อน inbound_push → D1)
     try:
         os.makedirs(os.path.dirname(INBOUND_FILE), exist_ok=True)
         tmp = INBOUND_FILE + ".tmp"
