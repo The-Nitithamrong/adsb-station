@@ -136,11 +136,17 @@ def build_updates(inb, bias):
     return ups
 
 
+# UA ที่ดูเหมือน browser — เลี่ยง Cloudflare Bot-Fight/Browser-Integrity ที่ตี default `Python-urllib`
+# เป็น bot แล้วบล็อกที่ขอบก่อนถึง Worker (HTTP 403 "error code: 1010"). พิสูจน์แล้วว่าใส่แล้วผ่าน 200.
+USER_AGENT = "Mozilla/5.0 (pi-radar; adsb-station eta_push)"
+
+
 def post(updates):
     body = json.dumps({"source": SOURCE, "updates": updates}).encode()
     req = urllib.request.Request(
         INGEST_URL, data=body, method="POST",
         headers={"Content-Type": "application/json",
+                 "User-Agent": USER_AGENT,
                  "Authorization": f"Bearer {INGEST_KEY}"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.status
@@ -157,8 +163,13 @@ def _on_term(signum, frame):
 def main():
     signal.signal(signal.SIGTERM, _on_term)
     signal.signal(signal.SIGINT, _on_term)
+    # key ต้องมี + เป็น ASCII: อักขระ non-ASCII (เช่น เผลอวาง placeholder ไทย) ใส่ใน HTTP header ไม่ได้
+    # → เดิมทำ daemon crash-loop (UnicodeEncodeError ไม่ถูกจับ). กันไว้ที่นี่: ข้ามการส่งแทนที่จะพัง.
+    key_ok = bool(INGEST_KEY) and INGEST_KEY.isascii()
     if not INGEST_KEY:
         print(f"eta_push: ETA_INGEST_KEY ไม่พบใน {ENV_FILE} — จะข้ามการส่งจนกว่าจะตั้งค่า (แล้ว restart)")
+    elif not key_ok:
+        print("eta_push: ETA_INGEST_KEY มีอักขระ non-ASCII (เผลอวาง placeholder?) — จะข้ามการส่ง (แก้ค่าแล้ว restart)")
     print(f"eta_push เริ่มทำงาน — THA→{INGEST_URL} ทุก {PUSH_EVERY_S}s")
 
     bias, bias_t = 0.0, 0.0
@@ -168,13 +179,13 @@ def main():
             bias, bias_t = eta_bias(), now
             print(f"bias refresh: {bias:+.1f} นาที (median จริง−คำนวณ, tracks THA)")
         inb = read_inbound()
-        if inb and INGEST_KEY:
+        if inb and key_ok:
             ups = build_updates(inb, bias)
             if ups:
                 try:
                     st = post(ups)
                     print(f"pushed {len(ups)} THA ETA (bias {bias:+.1f}m) → HTTP {st}")
-                except (urllib.error.URLError, OSError) as e:
+                except (urllib.error.URLError, OSError, UnicodeError) as e:
                     print("push ไม่สำเร็จ (retry รอบหน้า):", e)
         for _ in range(PUSH_EVERY_S):        # นอนสั้น ๆ ให้ตอบ SIGTERM ไว
             if _stop:

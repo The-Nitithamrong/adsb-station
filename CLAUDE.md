@@ -89,6 +89,12 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (needs ≥20 tracks, else bias=0). Body `{source:"pi-radar",updates:[{flight_number,eta}]}`, Bearer
   `ETA_INGEST_KEY`; worker upserts by flight_number (should age-out — no landed events sent). Daemon
   (Type=simple, stdlib). Creds `ETA_INGEST_KEY`(+`ETA_INGEST_URL` opt) in /etc/fr24-watchdog.env.
+  GOTCHA: must send a browser-ish `User-Agent` — Cloudflare Bot-Fight/Browser-Integrity blocks the default
+  `Python-urllib` UA at the edge with HTTP 403 "error code: 1010" BEFORE it reaches the Worker (not an auth
+  fail; a real token still 403s). `USER_AGENT="Mozilla/5.0 (pi-radar; ...)"` fixed it. Worker only updates
+  flights it already knows (roster) — an unknown flight_number returns `applied:0, reason:"no such flight"`
+  (that's normal for a test id like TG999, not an error). `ETA_INGEST_KEY` must be ASCII (a non-ASCII paste
+  would break the HTTP header → daemon guards against it and skips rather than crash-looping).
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `uptime`,
   `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotation via `ROTATE` in main
