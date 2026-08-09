@@ -16,8 +16,9 @@
   - แหล่ง: /run/flight-watcher/inbound.json → inbound_all → กรอง callsign ขึ้นต้น THA
   - flight_number: callsign THA476 → TG476 (ICAO→IATA prefix swap)
   - eta: เวลานาฬิกา BKK (now + eta_min) รูป "HH:MM"
-  - adjust จากสถิติ: บวก bias = median(จริง−คำนวณ) จากตาราง tracks (track_stats §4) → ETA ตรงเวลาจริง
-    ถึงพื้นมากขึ้น. self-calibrate: track สะสมมากขึ้น bias แม่นขึ้น. ข้อมูลน้อย/เพี้ยน → 0 (ไม่ปรับ)
+  - adjust จากสถิติ: คูณ factor = median(จริง÷คำนวณ) จากตาราง tracks → ETA ตรงเวลาจริงถึงพื้นขึ้น.
+    multiplicative (ไม่ใช่บวกคงที่) → สเกลตามขนาด ETA: ETA เล็ก (<10น.) ปรับน้อย ไม่ over-correct.
+    self-calibrate: track สะสมมากขึ้น factor แม่นขึ้น. ข้อมูลน้อย/เพี้ยน → 1.0 (ไม่ปรับ)
 
 stdlib ล้วน (urllib+sqlite3). daemon (Type=simple, User=arin) ยิงทุก ~30s เฉพาะเมื่อมี THA inbound.
 config/secrets ใน /etc/fr24-watchdog.env: ETA_INGEST_KEY (ลับ), ETA_INGEST_URL (opt, มี default).
@@ -41,9 +42,9 @@ IATA_PREFIX  = "TG"           # การบินไทย (IATA flight_number 
 DESCENT_FPM  = 900            # ต้องตรงกับ flight_watcher.ETA_DESCENT_FPM (คิด final ที่มองไม่เห็น)
 PUSH_EVERY_S     = 30         # ยิงทุกกี่วินาที
 INBOUND_STALE_S  = 120        # inbound.json เก่ากว่านี้ = flight_watcher ไม่เดิน → ไม่ยิง
-BIAS_REFRESH_S   = 600        # คำนวณ bias จาก DB ใหม่ทุก ~10 นาที (เปลี่ยนช้า ไม่ต้องทุกรอบ)
-BIAS_MIN_SAMPLES = 20         # ต้องมี track อย่างน้อยเท่านี้ถึงปรับ (กันข้อมูลน้อยเกิน)
-BIAS_OUTLIER_MIN = 30         # ทิ้ง diff ที่ |.| เกินนี้ (นาที) — track เพี้ยน/ค้าง
+FACTOR_REFRESH_S   = 600      # คำนวณ factor จาก DB ใหม่ทุก ~10 นาที (เปลี่ยนช้า ไม่ต้องทุกรอบ)
+FACTOR_MIN_SAMPLES = 20       # ต้องมี track อย่างน้อยเท่านี้ถึงปรับ (กันข้อมูลน้อยเกิน)
+FACTOR_LO, FACTOR_HI = 0.5, 1.5   # clamp ratio จริง/คำนวณ กัน track เพี้ยน (นอกช่วงนี้ทิ้ง)
 
 
 def load_env(path):
@@ -91,36 +92,41 @@ def flight_number(callsign):
     return None
 
 
-def eta_bias():
-    """median(จริง − คำนวณ) จาก tracks THA — track_stats §4 (actual vs computed ETA).
-    actual = (last_ts−alert_ts)/60 + last_alt/900 (บวก final ที่สัญญาณมองไม่เห็น); diff = actual − alert_eta.
-    บวก bias นี้ให้ ETA ที่ส่งตรงเวลาจริงถึงพื้นขึ้น. อ่าน DB แบบ read-only (flight_watcher เขียนอยู่)."""
+def eta_factor():
+    """median(จริง ÷ คำนวณ) จาก tracks THA — ตัวคูณปรับ ETA แบบ multiplicative (ผ่าน origin).
+    ใช้คูณ ดีกว่าบวก: correction สเกลตามขนาด ETA → ETA เล็ก (<10น.) ปรับน้อย ไม่ over-correct.
+    (เดิม bias −2น. แบบบวกคงที่ตัด ETA 3น. เหลือ 1น. = เพี้ยน 67%; factor ~0.92 → 2.76น. ตรงกว่า
+     และที่ alt→0 ⇒ ETA→0 สมเหตุผล ไม่เหมือน offset ที่บอก "ลงไปแล้ว −2น.")
+    actual = (last_ts−alert_ts)/60 + last_alt/900 (บวก final ที่มองไม่เห็น); ratio = actual / alert_eta.
+    อ่าน DB read-only (flight_watcher เขียนอยู่). ข้อมูลน้อย/เพี้ยน → 1.0 (ไม่ปรับ)."""
     try:
         db = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True, timeout=5)
     except sqlite3.Error:
-        return 0.0
+        return 1.0
     try:
         rows = db.execute(
             "SELECT alert_ts, alert_eta, last_ts, last_alt FROM tracks "
             "WHERE watched=1 AND alert_ts IS NOT NULL AND alert_eta IS NOT NULL "
             "AND last_ts IS NOT NULL").fetchall()
     except sqlite3.Error:
-        return 0.0
+        return 1.0
     finally:
         db.close()
-    diffs = []
+    ratios = []
     for alert_ts, alert_eta, last_ts, last_alt in rows:
+        if not alert_eta or alert_eta < 5:        # กันหารด้วยค่าน้อย/ศูนย์ (alert_eta ปกติ 15-30)
+            continue
         actual = (last_ts - alert_ts) / 60.0 + (last_alt or 0) / DESCENT_FPM
-        d = actual - alert_eta
-        if abs(d) <= BIAS_OUTLIER_MIN:
-            diffs.append(d)
-    if len(diffs) < BIAS_MIN_SAMPLES:
-        return 0.0
-    return statistics.median(diffs)
+        r = actual / alert_eta
+        if FACTOR_LO <= r <= FACTOR_HI:
+            ratios.append(r)
+    if len(ratios) < FACTOR_MIN_SAMPLES:
+        return 1.0
+    return statistics.median(ratios)
 
 
-def build_updates(inb, bias):
-    """THA ทุกลำใน inbound_all → [{flight_number, eta:"HH:MM" BKK}] (ปรับ bias แล้ว)."""
+def build_updates(inb, factor):
+    """THA ทุกลำใน inbound_all → [{flight_number, eta:"HH:MM" BKK}] (คูณ factor แล้ว)."""
     ups = []
     for a in inb.get("inbound_all", []):
         fn = flight_number(a.get("flight"))
@@ -129,7 +135,7 @@ def build_updates(inb, bias):
         em = a.get("eta_min")
         if em is None:
             continue
-        corrected = max(0.0, em + bias)
+        corrected = max(0.0, em * factor)
         # เวลานาฬิกา BKK = gmtime(landing_epoch + 7ชม.) — ไม่ผูกกับ tz ของเครื่อง
         landing = time.gmtime(time.time() + corrected * 60 + 7 * 3600)
         ups.append({"flight_number": fn, "eta": time.strftime("%H:%M", landing)})
@@ -184,19 +190,19 @@ def main():
         print("eta_push: ETA_INGEST_KEY มีอักขระ non-ASCII (เผลอวาง placeholder?) — จะข้ามการส่ง (แก้ค่าแล้ว restart)")
     print(f"eta_push เริ่มทำงาน — THA→{INGEST_URL} ทุก {PUSH_EVERY_S}s")
 
-    bias, bias_t = 0.0, 0.0
+    factor, factor_t = 1.0, 0.0
     while not _stop:
         now = time.time()
-        if now - bias_t > BIAS_REFRESH_S:
-            bias, bias_t = eta_bias(), now
-            print(f"bias refresh: {bias:+.1f} นาที (median จริง−คำนวณ, tracks THA)")
+        if now - factor_t > FACTOR_REFRESH_S:
+            factor, factor_t = eta_factor(), now
+            print(f"eta factor refresh: ×{factor:.3f} (median จริง÷คำนวณ, tracks THA)")
         inb = read_inbound()
         if inb and key_ok:
-            ups = build_updates(inb, bias)
+            ups = build_updates(inb, factor)
             if ups:
                 try:
                     st, body = post(ups)
-                    print(f"pushed {len(ups)} THA ETA (bias {bias:+.1f}m) → HTTP {st}{applied_note(body)}")
+                    print(f"pushed {len(ups)} THA ETA (×{factor:.3f}) → HTTP {st}{applied_note(body)}")
                 except (urllib.error.URLError, OSError, UnicodeError) as e:
                     print("push ไม่สำเร็จ (retry รอบหน้า):", e)
         for _ in range(PUSH_EVERY_S):        # นอนสั้น ๆ ให้ตอบ SIGTERM ไว
