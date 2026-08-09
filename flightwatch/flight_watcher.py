@@ -20,6 +20,7 @@ ETA_DESCENT_FPM = 900                     # ft/min เฉลี่ยขณะ d
 #   16000/750=21m, 18000/750=24m ✓  (dist/gs เชื่อไม่ได้: STAR ไม่บินตรง + gs ลดตอน descend)
 MAX_RANGE_NM  = 250
 CLEAR_SEC     = 300                       # ไม่เห็นเกินนี้ = ลบ state (ให้ arrival รอบใหม่ยิงได้อีก)
+HIST_MIN_SEC  = 15                        # เว้นระยะเวลาเก็บ dist/alt history อย่างน้อยเท่านี้ (ดู parse)
 # จุดเข้า STAR ของ VTBS (ทุกจุด FL180) — จากชาร์ต RNAV. ใช้ tag ว่าเครื่องเข้า arrival ทางไหน + กี่โมง
 STAR_FIXES = {
     "WILLA": (14.405, 100.060),   # NW  N14 24.3 E100 03.6
@@ -132,7 +133,7 @@ def parse(line):
                                    "dist_hist": [], "alt_hist": [], "notified": False,
                                    "first_ts": None, "samples": 0, "min_dist": None,
                                    "alt_at_min": None, "min_alt": None, "max_dist": None,
-                                   "alert_ts": None, "alert_eta": None,
+                                   "alert_ts": None, "alert_eta": None, "last_hist_ts": 0,
                                    "star_fix": None, "star_alt": None, "star_ts": None})
     for k, i in FIELDS.items():
         v = f[i].strip()
@@ -151,9 +152,15 @@ def parse(line):
     # อัปเดตระยะเมื่อมี position ใหม่
     if p["lat"] is not None and p["lon"] is not None:
         p["dist"] = haversine_nm(p["lat"], p["lon"], DEST_LAT, DEST_LON)
-        p["dist_hist"] = (p["dist_hist"] + [p["dist"]])[-6:]
-        if p["alt"] is not None:
-            p["alt_hist"] = (p["alt_hist"] + [p["alt"]])[-6:]
+        # เก็บ dist/alt history แบบเว้นเวลา >= HIST_MIN_SEC (ไม่ใช่ทุก fix): dump1090 ส่ง position หลาย
+        # fix/วินาที — ถ้าเก็บทุก fix, 6 ตัวหลังกินเวลา <1 วิ → ระยะแทบไม่เปลี่ยน → closing (>1nm) ไม่เคยจริง
+        # → is_inbound False ตลอด → พลาด inbound เกือบทั้งหมด (obs: THA ลง VTBS 8 เที่ยว แต่ events=0).
+        # เว้น 15 วิ → 6 ตัวกินเวลา ~75 วิ → closing วัดการเข้าใกล้จริงในช่วงเวลาที่มีความหมาย.
+        if p["ts"] - p["last_hist_ts"] >= HIST_MIN_SEC:
+            p["dist_hist"] = (p["dist_hist"] + [p["dist"]])[-6:]
+            if p["alt"] is not None:
+                p["alt_hist"] = (p["alt_hist"] + [p["alt"]])[-6:]
+            p["last_hist_ts"] = p["ts"]
         accumulate(p)
         detect_star(p)
         check(hexid, p)
