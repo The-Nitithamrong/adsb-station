@@ -1,0 +1,16 @@
+[Unit]
+Description=adsb-station push THA inbound ETA to busandgo geofence/shuttle worker (HTTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arin
+EnvironmentFile=/etc/fr24-watchdog.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/report/eta_push.py
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

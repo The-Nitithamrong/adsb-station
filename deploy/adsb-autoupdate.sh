@@ -75,6 +75,7 @@ grep -q '^flightwatch/'             <<<"$CHANGED" && systemctl restart flight-wa
 grep -q '^pixoo/'                   <<<"$CHANGED" && systemctl restart pixoo          && log "restarted pixoo"
 grep -q '^deploy/uptime_server.py$' <<<"$CHANGED" && systemctl restart adsb-uptime    && log "restarted adsb-uptime"
 grep -q '^report/inbound_push.py$'  <<<"$CHANGED" && systemctl restart adsb-inbound-push && log "restarted adsb-inbound-push"
+grep -q '^report/eta_push.py$'      <<<"$CHANGED" && systemctl restart adsb-eta-push     && log "restarted adsb-eta-push"
 # health-agent รันจาก repo (ha/health_agent.py) + import shared/pylib → เปลี่ยนอย่างใดต้อง restart
 grep -qE '^(ha/health_agent\.py|shared/)' <<<"$CHANGED" && systemctl restart adsb-health-agent && log "restarted adsb-health-agent"
 exit 0
