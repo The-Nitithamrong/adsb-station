@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly adsb-station OS package update (Sun 14:00 BKK, supervised)
+
+[Timer]
+# บ่ายวันอาทิตย์ที่คนตื่นเฝ้าได้ — ไม่ใช่ตี 4 หน้าต่างเงียบที่ Pi เคยแฮงก์
+OnCalendar=Sun *-*-* 14:00:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target
