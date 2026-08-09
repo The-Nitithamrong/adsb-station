@@ -149,7 +149,19 @@ def post(updates):
                  "User-Agent": USER_AGENT,
                  "Authorization": f"Bearer {INGEST_KEY}"})
     with urllib.request.urlopen(req, timeout=15) as r:
-        return r.status
+        return r.status, r.read().decode(errors="ignore")
+
+
+def applied_note(body):
+    """สรุป applied/skipped จาก response ของ worker → บอกว่ามัน 'เก็บ' หรือ 'ทิ้ง' เที่ยวที่ส่งไป.
+    HTTP 200 = worker รับ request เฉย ๆ; applied=0/skipped>0 = ทิ้ง (เที่ยวไม่อยู่ใน roster)."""
+    try:
+        j = json.loads(body)
+    except ValueError:
+        return ""
+    if "applied" in j or "skipped" in j:
+        return f" (applied {j.get('applied')}, skipped {j.get('skipped')})"
+    return ""
 
 
 _stop = False
@@ -183,8 +195,8 @@ def main():
             ups = build_updates(inb, bias)
             if ups:
                 try:
-                    st = post(ups)
-                    print(f"pushed {len(ups)} THA ETA (bias {bias:+.1f}m) → HTTP {st}")
+                    st, body = post(ups)
+                    print(f"pushed {len(ups)} THA ETA (bias {bias:+.1f}m) → HTTP {st}{applied_note(body)}")
                 except (urllib.error.URLError, OSError, UnicodeError) as e:
                     print("push ไม่สำเร็จ (retry รอบหน้า):", e)
         for _ in range(PUSH_EVERY_S):        # นอนสั้น ๆ ให้ตอบ SIGTERM ไว
