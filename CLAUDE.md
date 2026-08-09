@@ -78,6 +78,17 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   same `D1_*` creds + push pattern as heartbeat/outbox; stdlib). Create `inbound_live` once
   (`INBOUND_SCHEMA` at file end). Web app reads via a Pages D1 binding —
   `SELECT * FROM inbound_live WHERE station=? ORDER BY eta_min`.
+- `report/eta_push.py` (+ `systemd/adsb-eta-push.service`) — OPTIONAL: HTTP POST THA inbound ETA to the
+  busandgo geofence/shuttle Cloudflare Worker (`/flights/eta`) every ~30s → feeds the crew-transport
+  workflow (knows when a TG flight lands → geofence trigger). Differs from inbound_push (D1, ALL
+  airlines): this is HTTP-direct, THA-only. Source = `inbound_all` in inbound.json, filtered to callsign
+  `THA*`; `flight_number` = `THA476`→`TG476` (ICAO→IATA prefix swap); `eta` = BKK clock `"HH:MM"`
+  (now+eta_min). ADJUST-from-stats: adds `bias = median(actual−computed)` over `tracks` (THA, watched=1)
+  — the same actual-vs-computed ETA metric as `track_stats.py` §4 (`actual=(last_ts−alert_ts)/60 +
+  last_alt/900`) — so the pushed ETA self-calibrates toward real touchdown time as tracks accumulate
+  (needs ≥20 tracks, else bias=0). Body `{source:"pi-radar",updates:[{flight_number,eta}]}`, Bearer
+  `ETA_INGEST_KEY`; worker upserts by flight_number (should age-out — no landed events sent). Daemon
+  (Type=simple, stdlib). Creds `ETA_INGEST_KEY`(+`ETA_INGEST_URL` opt) in /etc/fr24-watchdog.env.
 - `pixoo/{renderer,pages,main}.py` — Pixoo renderer (pixel fonts + `fontmode="1"` = no anti-alias),
   page registry, push loop. Needs PixelOperator*.ttf in pixoo/. Pages: `feeder_status`, `uptime`,
   `next_flight` (tha_inbound / flights_list kept but out of rotation). Frame rotation via `ROTATE` in main
@@ -183,7 +194,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   Pixoo derives unknown from `ts` age (`FAN_STALE_SEC`) → hides the icon.
 
 ## Conventions / guardrails
-- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*, GCAL_ICS_URL). NEVER commit .env or *.db.
+- SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*, GCAL_ICS_URL, ETA_INGEST_KEY). NEVER commit .env or *.db.
   (GCAL_ICS_URL is a private calendar link — treat as secret; anyone with it reads your calendar.)
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
   - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
