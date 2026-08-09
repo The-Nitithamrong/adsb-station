@@ -21,6 +21,8 @@ ETA_DESCENT_FPM = 900                     # ft/min เฉลี่ยขณะ d
 MAX_RANGE_NM  = 250
 CLEAR_SEC     = 300                       # ไม่เห็นเกินนี้ = ลบ state (ให้ arrival รอบใหม่ยิงได้อีก)
 HIST_MIN_SEC  = 15                        # เว้นระยะเวลาเก็บ dist/alt history อย่างน้อยเท่านี้ (ดู parse)
+VRATE_CLIMB_FPM = 300                     # vertical rate เกินนี้ = ไต่ขึ้น (ขาออก) → ตัดออกจาก inbound
+VRATE_DESC_FPM  = 200                     # vertical rate ต่ำกว่า -นี้ = ร่อนลง (ขาเข้า) โดยตรง
 # จุดเข้า STAR ของ VTBS (ทุกจุด FL180) — จากชาร์ต RNAV. ใช้ tag ว่าเครื่องเข้า arrival ทางไหน + กี่โมง
 STAR_FIXES = {
     "WILLA": (14.405, 100.060),   # NW  N14 24.3 E100 03.6
@@ -40,7 +42,7 @@ INBOUND_WRITE_SEC = 10                    # throttle การเขียน in
 LIST_MAX = 5                              # กี่เครื่องใน list บน Pixoo (แถวที่พอดีจอ)
 TRACK_NEAR_NM = 60                        # บันทึก track เฉพาะเที่ยวที่เข้าใกล้ VTBS <= นี้ (approach/arrival; กัน overflight ไกล)
 TRACK_MIN_SAMPLES = 5                     # ต้องมี position fix อย่างน้อยเท่านี้ถึงบันทึก (กัน noise)
-FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15}
+FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15, "vrate": 16}
 
 # ---------- Telegram (reuse env เดิม) ----------
 def load_env(path):
@@ -106,8 +108,12 @@ def is_inbound(p):
     if len(dh) < 3:
         return False
     closing = dh[-1] < dh[0] - 1          # ระยะลดลงจริง (>1nm กันสั่น)
+    vr = p.get("vrate")                    # SBS field 16 (type 4 velocity): +ไต่ / −ร่อน ft/min
+    if vr is not None and vr > VRATE_CLIMB_FPM:
+        return False                       # กำลังไต่ขึ้น = ขาออก → ไม่ใช่ inbound (แม้ closing+low)
     ah = p["alt_hist"]
-    descending = len(ah) >= 2 and ah[-1] <= ah[0]
+    # ร่อนลง = vrate ติดลบชัด (ตรง+ไว ต่อ message) หรือ fallback: alt แนวโน้มลด (ตอน vrate ยังไม่มา)
+    descending = (vr is not None and vr < -VRATE_DESC_FPM) or (len(ah) >= 2 and ah[-1] <= ah[0])
     low = p.get("alt") is not None and p["alt"] < 25000
     return closing and (descending or low)
 
@@ -128,7 +134,7 @@ def parse(line):
     hexid = f[4].strip()
     if not hexid:
         return
-    p = flights.setdefault(hexid, {"callsign": "", "alt": None, "gs": None,
+    p = flights.setdefault(hexid, {"callsign": "", "alt": None, "gs": None, "vrate": None,
                                    "lat": None, "lon": None, "dist": None,
                                    "dist_hist": [], "alt_hist": [], "notified": False,
                                    "first_ts": None, "samples": 0, "min_dist": None,
@@ -141,7 +147,7 @@ def parse(line):
             continue
         if k == "callsign":
             p["callsign"] = v
-        elif k in ("alt", "gs", "trk"):
+        elif k in ("alt", "gs", "trk", "vrate"):
             try: p[k] = int(v)
             except ValueError: pass
         else:

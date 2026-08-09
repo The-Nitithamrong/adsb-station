@@ -37,6 +37,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (Per-flight Telegram REMOVED — was noise; replaced by the daily digest below. `notify()` kept but unused.)
   Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page,
   and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
+  GOTCHA (`is_inbound`): "closing" is judged from `dist_hist` spaced by TIME (`HIST_MIN_SEC`=15s), NOT
+  by fix count — dump1090 sends many msg/s AND `lat/lon` persist in state so `dist_hist` was appended on
+  EVERY message (~10/s), making the last-6 window span <1s → distance barely changes → `closing` (needs
+  >1nm) never true → is_inbound False for real arrivals (obs: 8 THA landed, `events`=0). Time-spacing
+  fixes it. Also reads `vrate` (SBS field 16, type-4 velocity): climb >`VRATE_CLIMB_FPM` = departure →
+  excluded even if closing+low (kills the departing-TG false positive); descend < -`VRATE_DESC_FPM` = a
+  direct inbound signal (falls back to alt-trend when vrate not yet received).
 - `flightwatch/track_stats.py` — reads `tracks`: coverage floor (how low we still receive near VTBS),
   actual STAR-gate→signal-loss time per gate, arrivals-by-hour-of-day (BKK traffic distribution), and
   actual vs computed ETA. `python3 track_stats.py [THA]`.
