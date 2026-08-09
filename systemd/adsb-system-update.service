@@ -1,0 +1,14 @@
+[Unit]
+Description=adsb-station weekly OS package update (gentle) + Telegram summary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# priority ต่ำสุด: กันพีค CPU/I/O ตอน apt ไปสะกิด brownout/แฮงก์ (เหตุ Pi#1 รีบูต 2026-08-09 04:10)
+Nice=19
+IOSchedulingClass=idle
+CPUWeight=20
+# apt ค้าง = ฆ่าทิ้งใน 30 นาที ไม่ให้บล็อกยาว (เดิม oneshot ไม่มี timeout = ค้างได้ตลอด)
+TimeoutStartSec=30min
+ExecStart=/usr/local/bin/adsb-system-update.sh
