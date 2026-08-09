@@ -218,7 +218,9 @@ def check(hexid, p):
         # ไม่ยิง Telegram ต่อเที่ยวแล้ว (noise) — ย้ายไป daily digest 09:00 (report/daily_status.py).
         # ยังบันทึก events + inbound.json (Pixoo) + tracks ตามเดิม เพื่อวิเคราะห์/แสดงผล.
         print(f"  >>> {cs} inbound VTBS ETA ~{e:.0f}m (logged, no TG)")
-        db.execute("INSERT INTO events VALUES (?,?,?,?,?,?,?)",
+        # ระบุชื่อคอลัมน์ชัด — outbox.py เติมคอลัมน์ `sent` (ALTER) → ตารางกลายเป็น 8 คอลัมน์;
+        # `INSERT ... VALUES` แบบไม่ระบุชื่อจะพังเพราะให้ 7 ค่า (crash-loop). ระบุชื่อ → `sent` ได้ default.
+        db.execute("INSERT INTO events (ts,flight,hex,eta_min,dist_nm,gs,alt) VALUES (?,?,?,?,?,?,?)",
                    (int(time.time()), cs, hexid, round(e, 1),
                     round(p["dist"], 1), p["gs"], p["alt"]))
         db.commit()
