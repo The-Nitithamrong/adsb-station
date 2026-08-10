@@ -9,12 +9,16 @@
 
 สัญญา (contract) ฝั่ง worker:
   POST <ETA_INGEST_URL>   Authorization: Bearer <ETA_INGEST_KEY>
-  {"source":"pi-radar","updates":[
+  {"source":"pi-radar",
+   "eta_factor":0.92,"eta_factor_samples":143,   ← ETA ที่ส่งถูกคูณด้วยเท่าไร + จากกี่ track
+   "updates":[
      {"flight_number":"TG476","eta":"16:58",
       "lat":13.412,"lon":100.981,          ← ตำแหน่ง/ท่าทาง ทุกฟิลด์ optional
       "altitude_ft":12000,"ground_speed_kt":289,"track_deg":201,"distance_nm":47.3}, ...]}
   worker upsert ตาม flight_number (idempotent) — ควร age-out entry ที่เก่าเอง (เราไม่ส่ง landed)
   ฟิลด์ที่ยังไม่มีค่า "ไม่ส่งไปเลย" (ไม่ส่ง null) — upsert ด้วย null อาจไปทับค่าดีที่ worker เก็บไว้
+  eta_factor_samples < FACTOR_MIN_SAMPLES (20) = ยังไม่ calibrate → eta_factor เป็น 1.0 เสมอ
+  (แยกจากกรณี "คำนวณได้ 1.0 พอดี" ไม่ได้ถ้าดูแค่ factor — ต้องดู samples คู่กัน)
 
 ที่มา + การปรับ:
   - แหล่ง: /run/flight-watcher/inbound.json → inbound_all → กรอง callsign ขึ้นต้น THA
@@ -100,22 +104,25 @@ def flight_number(callsign):
 
 def eta_factor():
     """median(จริง ÷ คำนวณ) จาก tracks THA — ตัวคูณปรับ ETA แบบ multiplicative (ผ่าน origin).
+    คืน (factor, n) — n = จำนวน track ที่ใช้คำนวณ. ส่ง n ไปกับ payload ด้วย เพราะ factor=1.0
+    เดี่ยว ๆ กำกวม: "ข้อมูลไม่พอเลยไม่ปรับ" กับ "คำนวณแล้วได้ 1.0 พอดี" หน้าตาเหมือนกัน —
+    n < FACTOR_MIN_SAMPLES บอกว่าเป็นกรณีแรก (ค่าที่ส่งคือ ETA ดิบ ยังไม่ calibrate).
     ใช้คูณ ดีกว่าบวก: correction สเกลตามขนาด ETA → ETA เล็ก (<10น.) ปรับน้อย ไม่ over-correct.
     (เดิม bias −2น. แบบบวกคงที่ตัด ETA 3น. เหลือ 1น. = เพี้ยน 67%; factor ~0.92 → 2.76น. ตรงกว่า
      และที่ alt→0 ⇒ ETA→0 สมเหตุผล ไม่เหมือน offset ที่บอก "ลงไปแล้ว −2น.")
     actual = (last_ts−alert_ts)/60 + last_alt/900 (บวก final ที่มองไม่เห็น); ratio = actual / alert_eta.
-    อ่าน DB read-only (flight_watcher เขียนอยู่). ข้อมูลน้อย/เพี้ยน → 1.0 (ไม่ปรับ)."""
+    อ่าน DB read-only (flight_watcher เขียนอยู่). ข้อมูลน้อย/เพี้ยน → (1.0, n) (ไม่ปรับ)."""
     try:
         db = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True, timeout=5)
     except sqlite3.Error:
-        return 1.0
+        return 1.0, 0
     try:
         rows = db.execute(
             "SELECT alert_ts, alert_eta, last_ts, last_alt FROM tracks "
             "WHERE watched=1 AND alert_ts IS NOT NULL AND alert_eta IS NOT NULL "
             "AND last_ts IS NOT NULL").fetchall()
     except sqlite3.Error:
-        return 1.0
+        return 1.0, 0
     finally:
         db.close()
     ratios = []
@@ -127,8 +134,8 @@ def eta_factor():
         if FACTOR_LO <= r <= FACTOR_HI:
             ratios.append(r)
     if len(ratios) < FACTOR_MIN_SAMPLES:
-        return 1.0
-    return statistics.median(ratios)
+        return 1.0, len(ratios)
+    return statistics.median(ratios), len(ratios)
 
 
 # ตำแหน่ง/ท่าทางของเครื่อง: คีย์ใน inbound_all → ชื่อฟิลด์ตามสัญญาของ worker (+วิธีปัด).
@@ -183,8 +190,11 @@ def build_updates(inb, factor):
 USER_AGENT = "Mozilla/5.0 (pi-radar; adsb-station eta_push)"
 
 
-def post(updates):
-    body = json.dumps({"source": SOURCE, "updates": updates}).encode()
+def post(updates, factor, samples):
+    """factor/samples อยู่ระดับ body (ไม่ใช่ราย update) เพราะเป็นค่าเดียวกันทั้งรอบ —
+    บอก worker ว่า eta ที่ส่งมาถูกคูณด้วยเท่าไร + คำนวณจากกี่ track (n น้อย = ยังไม่ calibrate)."""
+    body = json.dumps({"source": SOURCE, "eta_factor": round(factor, 3),
+                       "eta_factor_samples": samples, "updates": updates}).encode()
     req = urllib.request.Request(
         INGEST_URL, data=body, method="POST",
         headers={"Content-Type": "application/json",
@@ -226,18 +236,19 @@ def main():
         print("eta_push: ETA_INGEST_KEY มีอักขระ non-ASCII (เผลอวาง placeholder?) — จะข้ามการส่ง (แก้ค่าแล้ว restart)")
     print(f"eta_push เริ่มทำงาน — THA→{INGEST_URL} ทุก {PUSH_EVERY_S}s")
 
-    factor, factor_t = 1.0, 0.0
+    factor, samples, factor_t = 1.0, 0, 0.0
     while not _stop:
         now = time.time()
         if now - factor_t > FACTOR_REFRESH_S:
-            factor, factor_t = eta_factor(), now
-            print(f"eta factor refresh: ×{factor:.3f} (median จริง÷คำนวณ, tracks THA)")
+            (factor, samples), factor_t = eta_factor(), now
+            note = "" if samples >= FACTOR_MIN_SAMPLES else f" — track ยังไม่ถึง {FACTOR_MIN_SAMPLES} ไม่ปรับ"
+            print(f"eta factor refresh: ×{factor:.3f} (median จริง÷คำนวณ, {samples} tracks THA){note}")
         inb = read_inbound()
         if inb and key_ok:
             ups = build_updates(inb, factor)
             if ups:
                 try:
-                    st, body = post(ups)
+                    st, body = post(ups, factor, samples)
                     print(f"pushed {len(ups)} THA ETA (×{factor:.3f}) → HTTP {st}{applied_note(body)}")
                 except (urllib.error.URLError, OSError, UnicodeError) as e:
                     print("push ไม่สำเร็จ (retry รอบหน้า):", e)

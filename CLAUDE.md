@@ -93,8 +93,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (now+eta_min). ADJUST-from-stats: adds `bias = median(actual−computed)` over `tracks` (THA, watched=1)
   — the same actual-vs-computed ETA metric as `track_stats.py` §4 (`actual=(last_ts−alert_ts)/60 +
   last_alt/900`) — so the pushed ETA self-calibrates toward real touchdown time as tracks accumulate
-  (needs ≥20 tracks, else bias=0). Body `{source:"pi-radar",updates:[{flight_number,eta, +position}]}`
-  where position = `lat,lon,altitude_ft,ground_speed_kt,track_deg,distance_nm` (raw values at that
+  (needs ≥20 tracks, else bias=0). Body
+  `{source:"pi-radar", eta_factor, eta_factor_samples, updates:[{flight_number,eta, +position}]}` —
+  `eta_factor`/`eta_factor_samples` are body-level (one value per push) so the consumer knows how much
+  the ETA was scaled and off how many tracks; `samples < FACTOR_MIN_SAMPLES` (20) means NOT calibrated
+  yet and `eta_factor` is forced to 1.0 (factor alone can't distinguish that from a true 1.0, so
+  `eta_factor()` returns `(factor, n)`). Position =
+  `lat,lon,altitude_ft,ground_speed_kt,track_deg,distance_nm` (raw values at that
   moment — the ETA factor corrects ETA only; `distance_nm` is to VTBS, not to the station). Every
   position field is OPTIONAL and is OMITTED when not yet received (never sent as `null` — the worker
   upserts by flight_number, so a null would overwrite a good stored value). Mapping lives in
