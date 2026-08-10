@@ -1,0 +1,48 @@
+# pi1-fan-control.yaml — HA automation: เปิด/ปิดพัดลม Tuya ตาม CPU temp ของ Pi#1
+# วาง: HA → Settings → Automations & Scenes → Create Automation → ⋮ → Edit in YAML → วางทับ → Save.
+#
+# ⚠️ เดิม automation นี้อยู่บน HA ของ Pi#1 — ย้าย HA ไป Pi#2 แล้วไม่ได้สร้างใหม่ → ไม่มีใครสั่งปิด →
+#    พัดลมค้าง on (digest โชว์ "พัดลม 24ชม"). ไฟล์นี้เก็บใน repo แล้ว กันหายอีกตอนย้ายครั้งหน้า.
+#
+# ⚠️ แก้ 2 ค่าให้ตรงของจริง (ห้ามเดา — ดูคำสั่งพิมพ์ค่าจริงใน MIGRATE_HA_TO_PI2.md / คุยในแชต):
+#   - sensor.ads_b_arin_cpu_temperature : entity CPU temp ของ Pi#1 (device "ADS-B <host>" slugify;
+#       ถ้า STATION_ID=pi-adsb จะเป็น sensor.ads_b_pi_adsb_cpu_temperature — copy จาก Developer Tools → States)
+#   - switch.YOUR_FAN_SWITCH : switch Tuya ของ "พัดลม" จริง (คนละตัวกับปลั๊กไฟ Pi#1 = switch.pi_socket_1)
+# ปรับ threshold ได้: เปิดที่ above, ปิดที่ below (ต่างกัน = hysteresis กันเปิด-ปิดถี่)
+#
+# กันค้าง (สำคัญ): numeric_state จุดชนวนเฉพาะตอน "ข้าม" เกณฑ์ — ถ้าพลาด edge (HA รีสตาร์ท/sensor หาย)
+# พัดลมค้าง → ใส่ time_pattern re-check ทุก 3 นาที + choose ตั้งสถานะให้ถูกตาม temp ปัจจุบันเสมอ (self-heal)
+
+alias: "ADS-B: Pi#1 cooling fan by CPU temp"
+description: "เปิด/ปิดพัดลม Tuya ตาม CPU temp ของ Pi#1 (hysteresis + time_pattern กันค้าง)"
+mode: single
+trigger:
+  - platform: numeric_state
+    entity_id: sensor.ads_b_arin_cpu_temperature
+    above: 60
+  - platform: numeric_state
+    entity_id: sensor.ads_b_arin_cpu_temperature
+    below: 52
+  - platform: time_pattern
+    minutes: "/3"
+action:
+  - choose:
+      # ร้อน (>60°C) → เปิดพัดลม
+      - conditions:
+          - condition: numeric_state
+            entity_id: sensor.ads_b_arin_cpu_temperature
+            above: 60
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: switch.YOUR_FAN_SWITCH
+      # เย็น (<52°C) → ปิดพัดลม
+      - conditions:
+          - condition: numeric_state
+            entity_id: sensor.ads_b_arin_cpu_temperature
+            below: 52
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: switch.YOUR_FAN_SWITCH
+    # temp 52-60 (โซน hysteresis) → ไม่แตะ คงสถานะเดิม
