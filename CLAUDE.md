@@ -93,7 +93,17 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (now+eta_min). ADJUST-from-stats: adds `bias = median(actual−computed)` over `tracks` (THA, watched=1)
   — the same actual-vs-computed ETA metric as `track_stats.py` §4 (`actual=(last_ts−alert_ts)/60 +
   last_alt/900`) — so the pushed ETA self-calibrates toward real touchdown time as tracks accumulate
-  (needs ≥20 tracks, else bias=0). Body `{source:"pi-radar",updates:[{flight_number,eta}]}`, Bearer
+  (needs ≥20 tracks, else bias=0). Body
+  `{source:"pi-radar", eta_factor, eta_factor_samples, updates:[{flight_number,eta, +position}]}` —
+  `eta_factor`/`eta_factor_samples` are body-level (one value per push) so the consumer knows how much
+  the ETA was scaled and off how many tracks; `samples < FACTOR_MIN_SAMPLES` (20) means NOT calibrated
+  yet and `eta_factor` is forced to 1.0 (factor alone can't distinguish that from a true 1.0, so
+  `eta_factor()` returns `(factor, n)`). Position =
+  `lat,lon,altitude_ft,ground_speed_kt,track_deg,distance_nm` (raw values at that
+  moment — the ETA factor corrects ETA only; `distance_nm` is to VTBS, not to the station). Every
+  position field is OPTIONAL and is OMITTED when not yet received (never sent as `null` — the worker
+  upserts by flight_number, so a null would overwrite a good stored value). Mapping lives in
+  `POSITION_FIELDS`; add a field there + in `all_inbound()` to extend. Bearer
   `ETA_INGEST_KEY`; worker upserts by flight_number (should age-out — no landed events sent). Daemon
   (Type=simple, stdlib). Creds `ETA_INGEST_KEY`(+`ETA_INGEST_URL` opt) in /etc/fr24-watchdog.env.
   GOTCHA: must send a browser-ish `User-Agent` — Cloudflare Bot-Fight/Browser-Integrity blocks the default
@@ -197,6 +207,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `{ts, health: ok|recovering|dead, msg_per_s, aircraft}`. Pixoo derives `stale` from `ts` age.
 - `/run/flight-watcher/inbound.json` — written by flight_watcher (arin; via `RuntimeDirectory=flight-watcher`):
   `{ts, flight, eta_min, dist_nm, alt, gs, hex}` or `{ts, flight: null}` when no THA inbound.
+  Plus `nrx`, `list` (Pixoo) and `inbound_all` — every inbound aircraft, any airline:
+  `{flight, hex, eta_min, dist_nm, alt, gs, lat, lon, trk}` (`lat/lon` 4 dp ≈ 11 m; any field may be
+  `null` until that SBS message type arrives). Consumers: inbound_push → D1, eta_push → worker.
 - `/run/agenda/next.json` — written by agenda_fetch (arin; via `RuntimeDirectory=agenda` +
   `RuntimeDirectoryPreserve=yes` so the oneshot's dir survives between runs):
   `{ts, summary, code, route, start_ts, start_str, in_min, all_day}` or `{ts, summary: null}` when no

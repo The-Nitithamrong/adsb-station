@@ -273,7 +273,9 @@ def current_inbound():
 
 def all_inbound(limit=30):
     """ทุกเครื่อง (ทุกสายการบิน) ที่กำลัง inbound เข้า VTBS ตอนนี้ + ETA เรียงใกล้ถึงก่อน.
-    เหมือน current_inbound แต่ไม่กรอง THA — ป้อน inbound_push (web app ภายนอกที่อยากได้ทุกสาย)."""
+    เหมือน current_inbound แต่ไม่กรอง THA — ป้อน inbound_push (web app ภายนอกที่อยากได้ทุกสาย)
+    และ eta_push (กรอง THA แล้วส่งต่อ worker). lat/lon/trk ใส่มาด้วยเพื่อให้ผู้บริโภคปลายทางวาด
+    ตำแหน่งจริงบนแผนที่ได้ ไม่ใช่แค่ตัวเลข ETA (เพิ่มคีย์อย่างเดียว = ของเดิมไม่พัง)."""
     out = []
     for hexid, p in flights.items():
         if p.get("dist") is None or p["dist"] > MAX_RANGE_NM or not is_inbound(p):
@@ -283,7 +285,11 @@ def all_inbound(limit=30):
             continue
         out.append({"flight": p.get("callsign", "").strip() or hexid.upper(), "hex": hexid,
                     "eta_min": round(e, 1), "dist_nm": round(p["dist"], 1),
-                    "alt": p.get("alt"), "gs": p.get("gs")})
+                    "alt": p.get("alt"), "gs": p.get("gs"),
+                    # 4 ตำแหน่งทศนิยม ~11 m — พอสำหรับแผนที่/เส้นทาง และไฟล์ไม่บวม
+                    "lat": round(p["lat"], 4) if p.get("lat") is not None else None,
+                    "lon": round(p["lon"], 4) if p.get("lon") is not None else None,
+                    "trk": p.get("trk")})
     out.sort(key=lambda x: x["eta_min"])
     return out[:limit]
 
