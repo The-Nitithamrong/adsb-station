@@ -9,13 +9,19 @@
 
 สัญญา (contract) ฝั่ง worker:
   POST <ETA_INGEST_URL>   Authorization: Bearer <ETA_INGEST_KEY>
-  {"source":"pi-radar","updates":[{"flight_number":"TG476","eta":"16:58"}, ...]}
+  {"source":"pi-radar","updates":[
+     {"flight_number":"TG476","eta":"16:58",
+      "lat":13.412,"lon":100.981,          ← ตำแหน่ง/ท่าทาง ทุกฟิลด์ optional
+      "altitude_ft":12000,"ground_speed_kt":289,"track_deg":201,"distance_nm":47.3}, ...]}
   worker upsert ตาม flight_number (idempotent) — ควร age-out entry ที่เก่าเอง (เราไม่ส่ง landed)
+  ฟิลด์ที่ยังไม่มีค่า "ไม่ส่งไปเลย" (ไม่ส่ง null) — upsert ด้วย null อาจไปทับค่าดีที่ worker เก็บไว้
 
 ที่มา + การปรับ:
   - แหล่ง: /run/flight-watcher/inbound.json → inbound_all → กรอง callsign ขึ้นต้น THA
   - flight_number: callsign THA476 → TG476 (ICAO→IATA prefix swap)
   - eta: เวลานาฬิกา BKK (now + eta_min) รูป "HH:MM"
+  - lat/lon/altitude_ft/ground_speed_kt/track_deg/distance_nm: ค่าดิบจาก SBS ณ ตอนนั้น
+    (ไม่ปรับด้วย factor — factor แก้เฉพาะ ETA); distance_nm = ระยะถึง VTBS ไม่ใช่ถึงสถานี
   - adjust จากสถิติ: คูณ factor = median(จริง÷คำนวณ) จากตาราง tracks → ETA ตรงเวลาจริงถึงพื้นขึ้น.
     multiplicative (ไม่ใช่บวกคงที่) → สเกลตามขนาด ETA: ETA เล็ก (<10น.) ปรับน้อย ไม่ over-correct.
     self-calibrate: track สะสมมากขึ้น factor แม่นขึ้น. ข้อมูลน้อย/เพี้ยน → 1.0 (ไม่ปรับ)
@@ -125,8 +131,36 @@ def eta_factor():
     return statistics.median(ratios)
 
 
+# ตำแหน่ง/ท่าทางของเครื่อง: คีย์ใน inbound_all → ชื่อฟิลด์ตามสัญญาของ worker (+วิธีปัด).
+# ทุกฟิลด์ optional — ค่าไหนยังไม่มา (SBS ส่งคนละ message type) จะไม่ใส่ลง payload เลย
+# (ไม่ส่ง null: worker upsert ตาม flight_number ค่า null อาจไปทับค่าดีที่มีอยู่)
+POSITION_FIELDS = (
+    ("lat",     "lat",             lambda v: round(float(v), 4)),
+    ("lon",     "lon",             lambda v: round(float(v), 4)),
+    ("alt",     "altitude_ft",     int),
+    ("gs",      "ground_speed_kt", int),
+    ("trk",     "track_deg",       int),
+    ("dist_nm", "distance_nm",     lambda v: round(float(v), 1)),
+)
+
+
+def position_fields(a):
+    """ดึงฟิลด์ตำแหน่งที่ 'มีจริง' จาก 1 ลำใน inbound_all → dict พร้อมใส่ใน update."""
+    out = {}
+    for src, dst, conv in POSITION_FIELDS:
+        v = a.get(src)
+        if v is None:
+            continue
+        try:
+            out[dst] = conv(v)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def build_updates(inb, factor):
-    """THA ทุกลำใน inbound_all → [{flight_number, eta:"HH:MM" BKK}] (คูณ factor แล้ว)."""
+    """THA ทุกลำใน inbound_all → [{flight_number, eta:"HH:MM" BKK, +ตำแหน่ง}] (คูณ factor แล้ว).
+    ตำแหน่ง/alt/gs/track/dist เป็นค่าดิบ ณ ตอนนั้น (ไม่ปรับด้วย factor — factor แก้ ETA เท่านั้น)."""
     ups = []
     for a in inb.get("inbound_all", []):
         fn = flight_number(a.get("flight"))
@@ -138,7 +172,9 @@ def build_updates(inb, factor):
         corrected = max(0.0, em * factor)
         # เวลานาฬิกา BKK = gmtime(landing_epoch + 7ชม.) — ไม่ผูกกับ tz ของเครื่อง
         landing = time.gmtime(time.time() + corrected * 60 + 7 * 3600)
-        ups.append({"flight_number": fn, "eta": time.strftime("%H:%M", landing)})
+        up = {"flight_number": fn, "eta": time.strftime("%H:%M", landing)}
+        up.update(position_fields(a))
+        ups.append(up)
     return ups
 
 
