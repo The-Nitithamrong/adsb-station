@@ -1,0 +1,31 @@
+# pi1-fan-state.yaml — HA automation: republish สถานะ switch พัดลม → MQTT adsb/<sid>/fan (retained)
+# วาง: HA → Settings → Automations & Scenes → Create Automation → ⋮ → Edit in YAML → วางทับ → Save.
+#
+# ทำไม: Pi#1 mqtt_publish.py subscribe adsb/<sid>/fan แล้วเขียน /run/adsb-ha/fan.json (Pixoo UP-page fan icon)
+#   + fan_events.jsonl (report/fan_stats.py → บรรทัดพัดลมใน digest 09:00). ถ้าไม่มี automation นี้ →
+#   ค่า retained ค้างค่าเก่า → digest โชว์ "พัดลม on 24ชม" ทั้งที่ไม่จริง (เจอหลังย้าย HA ไป Pi#2).
+#
+# ⚠️ แก้ให้ตรงของจริง:
+#   - switch.YOUR_FAN_SWITCH : switch Tuya พัดลม (ตัวเดียวกับ pi1-fan-control.yaml)
+#   - topic adsb/arin/fan : sid = STATION_ID (หรือ hostname) ที่ non-alnum→"_" และ lowercase.
+#       ถ้า STATION_ID=pi-adsb → topic = adsb/pi_adsb/fan  (ต้องตรงกับ BASE ใน mqtt_publish เป๊ะ)
+# payload "on"/"off" — ตรงกับที่ mqtt_publish parse (val.lower() in on/true/1)
+
+alias: "ADS-B: Pi#1 fan state -> MQTT"
+description: "switch พัดลม Tuya เปลี่ยน → publish on/off ไป adsb/<sid>/fan (retained) ให้ Pixoo/digest"
+mode: queued
+trigger:
+  - platform: state
+    entity_id: switch.YOUR_FAN_SWITCH
+    to: "on"
+  - platform: state
+    entity_id: switch.YOUR_FAN_SWITCH
+    to: "off"
+  - platform: homeassistant
+    event: start          # ตอน HA รีสตาร์ท sync สถานะปัจจุบันครั้งแรก
+action:
+  - service: mqtt.publish
+    data:
+      topic: "adsb/arin/fan"                       # ← แก้ sid ให้ตรง BASE ของ mqtt_publish
+      retain: true
+      payload: "{{ states('switch.YOUR_FAN_SWITCH') }}"   # "on"/"off"

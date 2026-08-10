@@ -59,6 +59,17 @@ HA → Settings → Automations → Create → ⋮ → **Edit in YAML** → ว�
 - `entity_id` → switch ปลั๊ก Pi#1 จริง (Developer Tools → States หา `switch.*`)
 Save.
 
+## Phase 4b — ใส่ fan automations (กันพัดลมค้าง on)
+เดิม automation คุมพัดลมอยู่บน HA Pi#1 — ย้ายแล้วต้องสร้างใหม่ ไม่งั้นพัดลมไม่ถูกสั่งปิด (ค้าง on 24ชม)
+และ digest/Pixoo โชว์สถานะพัดลมค้าง. วาง 2 ไฟล์ (Create → ⋮ → Edit in YAML):
+- `automations/pi1-fan-control.yaml` — เปิด/ปิดพัดลมตาม CPU temp (hysteresis + time_pattern กันค้าง)
+- `automations/pi1-fan-state.yaml` — republish สถานะ switch → `adsb/<sid>/fan` (retained) ให้ Pixoo/digest
+แก้ทั้งคู่: `switch.YOUR_FAN_SWITCH` = switch Tuya พัดลมจริง; entity temp + topic `adsb/<sid>/fan` ให้ตรง sid.
+หา sid/entity จริงจาก Pi#1:
+```
+python3 -c "import re,socket; s=open('/etc/fr24-watchdog.env').read(); m=re.search(r'STATION_ID=(\S+)',s); st=(m.group(1).strip('\"\\'') if m else socket.gethostname()); sid=''.join(c if c.isalnum() else '_' for c in st).lower(); print('topic=adsb/'+sid+'/fan  entity=sensor.ads_b_'+sid+'_cpu_temperature')"
+```
+
 ## Phase 5 — ต่อ webhook URL เข้ากับ watchdog ทั้งสอง
 URL = `http://192.168.41.207:8123/api/webhook/pi1_power_cycle` (ตาม webhook_id ที่ตั้ง).
 - **peer-watchdog (Pi#2)** `/etc/fleet-peer-watchdog.env` → `HA_WEBHOOK_CYCLE=<URL>` → `sudo systemctl restart peer-watchdog`
