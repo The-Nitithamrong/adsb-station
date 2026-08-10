@@ -4,11 +4,45 @@ Checklist ตั้งค่า Pi#2 ใหม่ทั้งเครื่อ�
 Pi#2 = `arin@ArinII` @ **192.168.41.207** รัน 4 อย่าง: **fleet Mosquitto · Home Assistant (Docker) ·
 peer-watchdog · timetable kiosk** + GitOps (`pi-ha-autoupdate`).
 
-git มีแค่ **โค้ด** — secrets / HA config / mosquitto password **ไม่อยู่ใน git**. ต้อง back up เอง.
+git มีแค่ **โค้ด** — secrets / HA config **ไม่อยู่ใน git** (secret ห้าม commit). แต่ส่วนใหญ่ **recreate ได้**
+จาก Pi#1 / Google / regenerate — ตัวที่ต้อง back up จริงมีแค่ HA `config/` (ดูตารางถัดไป).
 
 ---
 
-## 0. ⚠️ ก่อนถอด USB drive — BACK UP state ที่ไม่อยู่ใน git (ทำก่อน! หายแล้วสร้างใหม่ยาก)
+## แนวคิด: อะไรมาจาก git · อะไรเป็น secret · อะไรต้อง back up จริง
+
+deploy structure จาก git ได้เลย (ทำอยู่แล้ว) — **secrets ห้ามเข้า git** (repo อยู่ GitHub ใครเห็นก็ได้ไปหมด:
+Telegram bot, ปฏิทิน, รหัส broker, SSH key ที่สั่งตัดไฟ Pi#1 ได้). ข่าวดี: secrets ส่วนใหญ่ **สร้างใหม่ได้**
+จากค่าที่รู้อยู่แล้ว → ตัวเดียวที่ต้อง back up จริงคือ **HA `config/`**.
+
+| อะไร | มาจากไหน | ต้อง back up? |
+|---|---|---|
+| systemd units, fleet.conf, automations YAML, docker-compose, โค้ดทั้งหมด | **git** (clone) | ❌ อยู่ใน repo |
+| mosquitto password (fleet/adsb) | ตั้งใหม่ให้ตรงรหัสเดิม — plaintext อยู่ใน **Pi#1** `/etc/fr24-watchdog.env` (`MQTT_PASS`) | ❌ recreate |
+| TG_API / TG_CHAT / HC_URL | ก๊อปจาก **Pi#1** `/etc/fr24-watchdog.env` | ❌ ก๊อปจาก Pi#1 |
+| ICS URL (ปฏิทินนักเรียน) | Google Calendar → Settings → Secret address iCal | ❌ ดึงใหม่ |
+| SSH `fleet_id` (L2 → Pi#1) | **regenerate** (`ssh-keygen`) + ใส่ `.pub` บน Pi#1 authorized_keys ใหม่ (~1 นาที) | ❌ regenerate |
+| peer-watchdog thresholds / DRY_RUN | `config.env.example` ใน repo | ❌ อยู่ใน repo |
+| **HA `config/`** (`.storage`: Tuya login, MQTT integration, entity registry, webhook_id) | **USB drive เดิม** — ไม่มีทางอื่นนอกจาก re-onboard HA ~15 นาที (re-add MQTT + Tuya + ปลั๊ก) | ✅ **ใช่ — คืนจาก USB** |
+
+→ จริง ๆ ก็แค่ **เก็บ USB ไว้ (อย่า format) แล้วก๊อป `config/` ตัวเดียว** ตอน provision (ดูวิธี mount ล่าง);
+secrets อื่นตั้งใหม่/ก๊อปจาก Pi#1 ระหว่างทำ ไม่ต้อง commit อะไรลับ ๆ เข้า git.
+
+### ก๊อป `config/` จาก USB drive เดิม (ไม่ต้อง scp/laptop)
+หลัง boot SD ใหม่แล้ว เสียบ USB เก่ากลับเป็นไดรฟ์รอง:
+```bash
+lsblk                                          # หา partition ของ USB (เช่น /dev/sda2)
+sudo mkdir -p /mnt/old && sudo mount /dev/sda2 /mnt/old    # ← แก้ตาม lsblk
+cp -a /mnt/old/home/arin/adsb-station/deploy/homeassistant/config \
+      /home/arin/adsb-station/deploy/homeassistant/
+sudo chown -R arin:arin /home/arin/adsb-station/deploy/homeassistant/config
+sudo umount /mnt/old
+```
+ถ้า SD พังยังบูต USB กลับได้ด้วย → เก็บ USB ไว้เป็น fallback
+
+---
+
+## 0. (ทางเลือก) tar backup ก้อนเดียว — ถ้าอยากเซฟทุกอย่างเผื่อไว้
 
 รันบน Pi#2 (ตอนยังบูตจาก USB อยู่) → tar เดียวเก็บทุกอย่าง (ไฟล์ไหนไม่มีก็ข้าม, `|| true` กันพัง):
 ```bash
@@ -57,13 +91,16 @@ sudo usermod -aG docker arin ; sudo systemctl enable --now docker
 git clone https://github.com/iamkkn/adsb-station.git /home/arin/adsb-station
 ```
 
-## 4. คืน secrets/env จาก backup (ข้อ 0)
+## 4. คืน HA config + secrets
+**หลัก:** ก๊อป `config/` จาก USB เก่า (ดู "ก๊อป config/ จาก USB drive เดิม" ด้านบน) — ตัวเดียวที่ต้องคืนจริง.
+secrets อื่นตั้งใหม่/ก๊อปจาก Pi#1 ในข้อ 5-8 (ดูตาราง "อะไรมาจากไหน" ด้านบน).
+
+**หรือ** ถ้าทำ tar ข้อ 0 ไว้ — คืนทีเดียวจบ:
 ```bash
 sudo tar xzf pi2-backup-*.tgz -C /            # คืน HA config + /etc env + mosquitto passwd + ssh key กลับที่เดิม
 sudo chown -R arin:arin /home/arin/adsb-station/deploy/homeassistant/config /home/arin/.ssh
 chmod 700 /home/arin/.ssh ; chmod 600 /home/arin/.ssh/fleet_id
 ```
-> ถ้า backup ไม่มี/ไม่ครบ: สร้างใหม่ตามข้อ 5-8 (mosquitto passwd, env จาก `*.example`, HA import automation).
 
 ## 5. Fleet Mosquitto broker
 ```bash
