@@ -157,10 +157,14 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   rewrites its whole row set every cycle, so writes = rows × cycles/day × (1 + indexes). At 36 aircraft
   on a 30s cycle that was ~9,700 rows-written/HOUR ≈ 233k/day — 2.3× over D1's free-tier 100k/day, and
   the cap is per-DATABASE, so blowing it takes outbox/heartbeat/sightings down too, not just this table.
-  Two fixes applied: default `PUSH_INTERVAL_S` 30 → 60, and DROP the secondary index. D1 counts index
-  writes as rows written, so an index on a table this small costs a full extra write per row per cycle
-  while saving nothing (a few dozen rows scan instantly, and rows-READ is identical either way).
-  Together ≈ 78k/day. Any new index here is a standing daily cost — think before adding one.
+  Two fixes applied: `PUSH_INTERVAL_S` default now 120 (30 → 60 → 120, re-measured each time), and
+  DROP the secondary index. D1 counts index writes as rows written, so an index on a table this small
+  costs a full extra write per row per cycle while saving nothing (a few dozen rows scan instantly, and
+  rows-READ is identical either way). 60s measured ≈ 72k/day which was still too tight: with sightings
+  and tracks the total sat at ~82k of 100k, leaving no room for a backlog — and one 19k-row outbox
+  backlog costs ~39k writes on its own. 120s ≈ 36k/day, total ~46k, half the quota free.
+  Any new index anywhere is a standing daily cost — `sightings.day`'s index was dropped for the same
+  reason once the API moved to `first_seen_ts` windows and stopped filtering on `day` at all.
 - `report/eta_push.py` (+ `systemd/adsb-eta-push.service`) — OPTIONAL: HTTP POST THA inbound ETA to the
   busandgo geofence/shuttle Cloudflare Worker (`/flights/eta`) every ~30s → feeds the crew-transport
   workflow (knows when a TG flight lands → geofence trigger). Differs from inbound_push (D1, ALL
