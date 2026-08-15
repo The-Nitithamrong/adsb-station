@@ -37,6 +37,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (Per-flight Telegram REMOVED — was noise; replaced by the daily digest below. `notify()` kept but unused.)
   Also writes `/run/flight-watcher/inbound.json` (soonest THA inbound) for the Pixoo THA page,
   and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
+  Also fills the `sightings` catalog: 1 row per `UNIQUE(day, flight, hex)` — day = UTC day, `flight` =
+  callsign, `hex` = ICAO 24-bit, `first_seen_ts/_utc` = when that aircraft's FIRST message arrived (not
+  when the callsign showed up — callsign rides MSG type 1, seconds later). Written once per in-memory
+  state via `p["logged"]`, but correctness rests on the UNIQUE index: state is dropped after
+  `CLEAR_SEC`, so an aircraft that leaves and returns re-fires the INSERT — `INSERT OR IGNORE` keeps the
+  earliest row. `reg` is ALWAYS NULL here (`reg_state`=0): ADS-B carries no registration, only hex —
+  `reg_lookup.py` fills it. Never look it up inline: `parse()` is the socket hot loop.
   GOTCHA (`is_inbound`): "closing" is judged from `dist_hist` spaced by TIME (`HIST_MIN_SEC`=15s), NOT
   by fix count — dump1090 sends many msg/s AND `lat/lon` persist in state so `dist_hist` was appended on
   EVERY message (~10/s), making the last-6 window span <1s → distance barely changes → `closing` (needs
@@ -69,12 +76,32 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   reproduced on BOTH SD and NVMe → storage/USB ruled out; remaining suspects power/kernel/thermal, which
   these fields pin down. CREATE the D1 table once before use (`HEARTBEAT_SCHEMA` at file end / README).
   D1 creds + `STATION_ID` reuse the same /etc/fr24-watchdog.env keys as outbox.
+- `flightwatch/reg_lookup.py` (+ `systemd/adsb-reg-lookup.{service,timer}`) — fills `sightings.reg`.
+  ADS-B has NO registration field — only the ICAO 24-bit `hex`, so `HS-TKF` must be looked up from
+  `8801f2`. Separate timer (~10 min) because the lookup is HTTP and `flight_watcher.parse()` must never
+  block on the network. `reg_state` drives the handoff: 0 pending → 1 resolved → 2 gave up after
+  `REG_MAX_TRIES` (unknown/military hex); outbox only ships rows with `reg_state != 0`, so a consumer
+  never sees a half-filled row and `registration: null` always means "not in the registry", never "not
+  looked up yet". Permanent local `aircraft(hex→reg)` cache = one upstream call per airframe EVER
+  (daily repeat visitors hit cache). Source is `REGDB_URL` (default hexdb.io); `pick()`/`REG_KEYS`
+  accept several JSON field spellings so swapping to adsbdb needs no code change. A network error
+  ABORTS the run instead of counting a try — else a flat upstream would mark good aircraft unknown.
 - `flightwatch/outbox.py` (+ `systemd/adsb-outbox.{service,timer}`) — OPTIONAL forwarder: sends new
-  `events`+`tracks` rows to a cloud sink (Cloudflare D1 now) every ~10 min. Adds a `sent` column to
-  each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows queue
-  and retry (survives connectivity gaps). D1 side: `uid` PK + `INSERT OR IGNORE` = idempotent on
+  `events`+`tracks`+`sightings` rows to a cloud sink (Cloudflare D1 now) every ~10 min. Adds a `sent`
+  column to each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows
+  queue and retry (survives connectivity gaps). D1 side: `uid` PK + `INSERT OR IGNORE` = idempotent on
   re-send. Pluggable — add a sink `send(table,cols,rows)->count` to `SINKS` (e.g. Dataverse later).
+  Per-table `where` = extra "ready to send" gate (`sightings` uses `reg_state != 0`) — needed BECAUSE
+  the sink is INSERT OR IGNORE: a row sent while `reg` is still NULL could never be corrected later.
   D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
+- `api/sightings-worker/` — READ-ONLY Cloudflare Worker serving the `sightings` catalog over HTTP:
+  `GET /sightings?date=&from=&to=&flight=&reg=&hex=&station=&limit=&offset=&order=` → `{count, limit,
+  offset, has_more, results:[{flight_number, registration, first_seen_utc, first_seen_ts, day, hex,
+  station}]}`, plus `/health`. All caller values are bound params (no SQL string building); CORS `*`;
+  optional bearer via a `API_KEY` secret (unset = public read). `has_more` = "got exactly `limit` rows"
+  rather than a second `COUNT(*)` (D1 bills rows read). Writes stay with outbox's D1 REST token, which
+  never leaves the Pi. `schema.sql` must be applied to D1 ONCE before the Pi starts pushing (see its
+  README) — until then outbox logs a per-run `sightings` failure and queues the rows; nothing is lost.
 - `report/inbound_push.py` (+ `systemd/adsb-inbound-push.service`) — OPTIONAL: pushes ALL live inbound
   aircraft (every airline, not just THA) + ETA to Cloudflare D1 table `inbound_live` every ~30s so an
   EXTERNAL web app can show real-time ETA for many flights. Source = `inbound_all` in

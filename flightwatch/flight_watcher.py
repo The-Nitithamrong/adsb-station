@@ -85,6 +85,16 @@ db.execute("""CREATE TABLE IF NOT EXISTS tracks(
     last_dist_nm REAL, last_alt INTEGER, max_dist_nm REAL,
     alert_ts INTEGER, alert_eta REAL,
     star_fix TEXT, star_alt INTEGER, star_ts INTEGER)""")
+# sightings = catalog "เห็นเที่ยวบินไหน ด้วยลำไหน ครั้งแรกเมื่อไร" — 1 แถวต่อ (วัน UTC, callsign, hex).
+# ต่างจาก tracks (สรุปการบินเข้าใกล้ VTBS เฉพาะเที่ยวที่ min_dist<=60nm): อันนี้เก็บ "ทุกลำที่รับได้"
+# ไม่ว่าจะบินผ่านเฉย ๆ หรือไกลแค่ไหน — ป้อน API ภายนอก (D1) ที่ถามว่าวันนี้เห็นเที่ยวบินอะไรบ้าง.
+# reg เว้นว่างไว้ก่อนเสมอ: ADS-B ไม่ได้ส่งทะเบียนมา (มีแค่ hex 24-bit) → reg_lookup.py เติมทีหลัง
+# (ห้าม lookup ตรงนี้ — parse() อยู่ใน hot loop ของ socket, บล็อกรอ HTTP = อ่าน stream ไม่ทัน ข้อมูลหาย)
+db.execute("""CREATE TABLE IF NOT EXISTS sightings(
+    day TEXT, flight TEXT, hex TEXT,
+    first_seen_ts INTEGER, first_seen_utc TEXT,
+    reg TEXT, reg_state INTEGER DEFAULT 0,
+    UNIQUE(day, flight, hex))""")
 # migrate DB เก่าที่ยังไม่มีคอลัมน์ star_* (idempotent)
 for _col, _typ in (("star_fix", "TEXT"), ("star_alt", "INTEGER"), ("star_ts", "INTEGER")):
     try:
@@ -140,7 +150,8 @@ def parse(line):
                                    "first_ts": None, "samples": 0, "min_dist": None,
                                    "alt_at_min": None, "min_alt": None, "max_dist": None,
                                    "alert_ts": None, "alert_eta": None, "last_hist_ts": 0,
-                                   "star_fix": None, "star_alt": None, "star_ts": None})
+                                   "star_fix": None, "star_alt": None, "star_ts": None,
+                                   "seen_ts": None, "logged": False})
     for k, i in FIELDS.items():
         v = f[i].strip()
         if not v:
@@ -154,6 +165,13 @@ def parse(line):
             try: p[k] = float(v)
             except ValueError: pass
     p["ts"] = time.time()
+    if p["seen_ts"] is None:
+        p["seen_ts"] = p["ts"]        # ข้อความแรกของลำนี้ = "เห็นครั้งแรก" (ก่อน callsign จะมาด้วยซ้ำ)
+    # callsign มาใน MSG type 1 ซึ่งมักช้ากว่าข้อความแรกไม่กี่วินาที — พอรู้ชื่อเที่ยวบินแล้วค่อยลงแคตตาล็อก
+    # (first_seen ยังใช้เวลาที่เห็นลำนี้ครั้งแรกจริง ๆ ไม่ใช่เวลาที่ callsign โผล่)
+    if not p["logged"] and p["callsign"].strip():
+        record_sighting(hexid, p)
+        p["logged"] = True
 
     # อัปเดตระยะเมื่อมี position ใหม่
     if p["lat"] is not None and p["lon"] is not None:
@@ -224,6 +242,24 @@ def check(hexid, p):
                    (int(time.time()), cs, hexid, round(e, 1),
                     round(p["dist"], 1), p["gs"], p["alt"]))
         db.commit()
+
+def record_sighting(hexid, p):
+    """ลงแคตตาล็อก 1 แถวต่อ (วัน UTC, เที่ยวบิน, ลำ) — เห็นครั้งแรกเมื่อไร.
+    UTC ไม่ใช่เวลาไทย: ผู้บริโภคเป็น API ภายนอก + ตรงกับ ts อื่น ๆ ในระบบ (day ก็ตัดตามวัน UTC).
+    INSERT OR IGNORE + UNIQUE(day,flight,hex) → เจอลำเดิมซ้ำทั้งวันก็ยังแถวเดียว และเวลาที่เก็บไว้
+    เป็นครั้งแรกเสมอ (สำคัญ: state ถูกลบเมื่อเงียบเกิน CLEAR_SEC เครื่องที่บินกลับเข้ามาใหม่จะ
+    logged=False แล้วยิง INSERT ซ้ำ — ให้ UNIQUE กันไว้ ไม่ใช่หวังพึ่ง state ในหน่วยความจำ)."""
+    cs = p["callsign"].strip()
+    ts = int(p.get("seen_ts") or p.get("ts") or time.time())
+    g = time.gmtime(ts)
+    try:
+        db.execute("INSERT OR IGNORE INTO sightings(day,flight,hex,first_seen_ts,first_seen_utc) "
+                   "VALUES (?,?,?,?,?)",
+                   (time.strftime("%Y-%m-%d", g), cs, hexid, ts,
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ", g)))
+        db.commit()
+    except sqlite3.Error as e:
+        print("sighting write skipped:", e)   # DB ล็อก/เต็ม ไม่ควรทำให้ลูปอ่าน stream ตาย
 
 def record_track(hexid, p):
     """บันทึก 1 แถวลง tracks ตอนเครื่องหายไป — เฉพาะเที่ยวที่เข้าใกล้สนามพอควร"""

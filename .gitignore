@@ -17,3 +17,6 @@ deploy/homeassistant/mosquitto/config/passwd
 
 # wrangler cache/logs (Cloudflare Pages deploy) — artifact อย่า commit
 .wrangler/
+# config deploy ที่ใส่ database_id จริง — repo นี้ public เลยไม่เก็บ id ของบัญชีลงไป
+# (ตัวที่ commit คือ wrangler.toml ที่ยังเป็น placeholder — ดู api/sightings-worker/README.md)
+api/*/wrangler.local.toml
