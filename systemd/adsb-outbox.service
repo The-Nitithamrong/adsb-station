@@ -6,4 +6,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=arin
+# systemd อ่านไฟล์ในฐานะ root แล้วส่ง env เข้ามา — ไม่ต้องพึ่งสิทธิ์อ่านไฟล์ของ arin
+EnvironmentFile=/etc/fr24-watchdog.env
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/flightwatch/outbox.py

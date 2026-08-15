@@ -42,7 +42,17 @@ def load_env(path):
 
 
 ENV = load_env(ENV_FILE)
-STATION = ENV.get("STATION_ID") or socket.gethostname()
+
+
+def cfg(key, default=None):
+    """env ของ process (systemd EnvironmentFile) ก่อน แล้วค่อยอ่านไฟล์เอง.
+    unit รันเป็น User=arin แต่ /etc/fr24-watchdog.env เก็บความลับ — ถ้าไฟล์เป็น root-only
+    load_env() จะเงียบ ๆ คืน {} แล้วฟ้อง 'ตั้ง D1_... ก่อน' ทั้งที่ตั้งไว้แล้ว (แยกจากกรณี
+    'ยังไม่ได้ตั้ง' ไม่ออก) → ให้ systemd อ่านไฟล์ในฐานะ root แล้วส่งเข้ามาทาง env แทน."""
+    return os.environ.get(key) or ENV.get(key) or default
+
+
+STATION = cfg("STATION_ID") or socket.gethostname()
 
 
 def log(*a):
@@ -158,7 +168,7 @@ def snapshot():
 
 
 def d1_insert(row):
-    acc, dbid, tok = ENV.get("D1_ACCOUNT_ID"), ENV.get("D1_DATABASE_ID"), ENV.get("D1_API_TOKEN")
+    acc, dbid, tok = cfg("D1_ACCOUNT_ID"), cfg("D1_DATABASE_ID"), cfg("D1_API_TOKEN")
     if not (acc and dbid and tok):
         raise RuntimeError(f"ตั้ง D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN ใน {ENV_FILE} ก่อน")
     sql = (f"INSERT OR IGNORE INTO heartbeat ({','.join(COLS)}) "

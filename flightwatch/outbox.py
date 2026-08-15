@@ -33,7 +33,17 @@ def load_env(path):
 
 
 ENV = load_env(ENV_FILE)
-STATION = ENV.get("STATION_ID") or socket.gethostname()
+
+
+def cfg(key, default=None):
+    """env ของ process (systemd EnvironmentFile) ก่อน แล้วค่อยอ่านไฟล์เอง.
+    ต้องดู os.environ ด้วย เพราะ unit รันเป็น User=arin แต่ /etc/fr24-watchdog.env เก็บความลับ —
+    ถ้าไฟล์เป็น root-only, load_env() จะเงียบ ๆ คืน {} แล้วฟ้อง 'ตั้ง D1_... ก่อน' ทั้งที่ตั้งไว้แล้ว
+    (อาการเดียวกับ 'ยังไม่ได้ตั้ง' เป๊ะ — แยกไม่ออก). ให้ systemd อ่านไฟล์ในฐานะ root ส่งเข้ามาแทน."""
+    return os.environ.get(key) or ENV.get(key) or default
+
+
+STATION = cfg("STATION_ID") or socket.gethostname()
 
 
 def log(*a):
@@ -65,7 +75,7 @@ TABLES = {
 
 # ---- Cloudflare D1 sink ----
 def d1_query(sql, params):
-    acc, dbid, tok = ENV.get("D1_ACCOUNT_ID"), ENV.get("D1_DATABASE_ID"), ENV.get("D1_API_TOKEN")
+    acc, dbid, tok = cfg("D1_ACCOUNT_ID"), cfg("D1_DATABASE_ID"), cfg("D1_API_TOKEN")
     if not (acc and dbid and tok):
         raise RuntimeError(f"ตั้ง D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN ใน {ENV_FILE} ก่อน")
     url = f"https://api.cloudflare.com/client/v4/accounts/{acc}/d1/database/{dbid}/query"
@@ -100,9 +110,9 @@ def d1_send(table, cols, rows):
 SINKS = {"d1": d1_send}
 
 
-def forward(db, table, cfg, sink):
-    cols = cfg["cols"]
-    extra = f" AND ({cfg['where']})" if cfg.get("where") else ""   # เงื่อนไข "พร้อมส่ง" เฉพาะ table
+def forward(db, table, tcfg, sink):
+    cols = tcfg["cols"]
+    extra = f" AND ({tcfg['where']})" if tcfg.get("where") else ""  # เงื่อนไข "พร้อมส่ง" เฉพาะ table
     try:
         rows = db.execute(
             f"SELECT rowid,{','.join(cols)} FROM {table} WHERE sent=0{extra} "
@@ -114,7 +124,7 @@ def forward(db, table, cfg, sink):
         return 0
     rowids = [r[0] for r in rows]
     send_cols = ["uid", "station"] + cols
-    send_rows = [(cfg["uid"](dict(zip(cols, r[1:], strict=True))), STATION, *r[1:]) for r in rows]
+    send_rows = [(tcfg["uid"](dict(zip(cols, r[1:], strict=True))), STATION, *r[1:]) for r in rows]
     n = sink(table, send_cols, send_rows)
     if n:
         done = rowids[:n]
@@ -128,7 +138,7 @@ def forward(db, table, cfg, sink):
 def main():
     if not os.path.exists(DB):
         return                                       # flight_watcher ยังไม่สร้าง DB
-    sink_name = ENV.get("OUTBOX_SINK", "d1")
+    sink_name = cfg("OUTBOX_SINK", "d1")
     sink = SINKS.get(sink_name)
     if not sink:
         log(f"ไม่รู้จัก sink '{sink_name}' (มี: {','.join(SINKS)})")
@@ -143,9 +153,9 @@ def main():
             pass                                     # มีแล้ว หรือตารางยังไม่มี
 
     total = 0
-    for t, cfg in TABLES.items():
+    for t, tcfg in TABLES.items():        # ห้ามตั้งชื่อ cfg — จะบัง cfg() ทำให้เป็น local ทั้งฟังก์ชัน
         try:
-            total += forward(db, t, cfg, sink)
+            total += forward(db, t, tcfg, sink)
         except Exception as e:                       # กัน table เดียวล้มทั้ง run
             log(f"{t}: ผิดพลาด — {e}")
     if total:
