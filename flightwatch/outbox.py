@@ -52,6 +52,14 @@ TABLES = {
                  "max_dist_nm", "alert_ts", "alert_eta", "star_fix", "star_alt", "star_ts"],
         "uid": lambda d: f"{STATION}:{d['hex']}:{d['last_ts']}",
     },
+    # แคตตาล็อกเที่ยวบิน 1 แถว/(วัน UTC, เที่ยวบิน, ลำ) — ป้อน API ภายนอก
+    # where: ข้ามแถวที่ reg_lookup ยังไม่แตะ (reg_state=0) — ส่งขึ้นไปครั้งเดียวตอนข้อมูลนิ่งแล้ว
+    # (D1 ใช้ INSERT OR IGNORE = ส่งซ้ำไม่อัปเดตของเดิม ถ้าส่งตอน reg ยังว่างทะเบียนจะไม่มีวันตามไปเติม)
+    "sightings": {
+        "cols": ["day", "flight", "hex", "first_seen_ts", "first_seen_utc", "reg"],
+        "uid": lambda d: f"{STATION}:{d['day']}:{d['flight']}:{d['hex']}",
+        "where": "reg_state != 0",
+    },
 }
 
 
@@ -94,9 +102,11 @@ SINKS = {"d1": d1_send}
 
 def forward(db, table, cfg, sink):
     cols = cfg["cols"]
+    extra = f" AND ({cfg['where']})" if cfg.get("where") else ""   # เงื่อนไข "พร้อมส่ง" เฉพาะ table
     try:
         rows = db.execute(
-            f"SELECT rowid,{','.join(cols)} FROM {table} WHERE sent=0 ORDER BY rowid LIMIT {BATCH}"
+            f"SELECT rowid,{','.join(cols)} FROM {table} WHERE sent=0{extra} "
+            f"ORDER BY rowid LIMIT {BATCH}"
         ).fetchall()
     except sqlite3.OperationalError:
         return 0                                    # ตารางยังไม่มี/ยังไม่มีคอลัมน์ sent

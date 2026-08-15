@@ -1,0 +1,14 @@
+name = "adsb-sightings-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# ผูก D1 ตัวเดียวกับที่ outbox/heartbeat/inbound_push ส่งขึ้นไป
+# database_id = ค่าเดียวกับ D1_DATABASE_ID ใน /etc/fr24-watchdog.env (ไม่ใช่ความลับ แต่เป็นของเฉพาะบัญชี
+# → ใส่ตอน deploy: แก้บรรทัดล่างนี้ หรือ `npx wrangler d1 list` เอา id มาวาง)
+[[d1_databases]]
+binding = "DB"
+database_name = "adsb"
+database_id = "PUT-D1-DATABASE-ID-HERE"
+
+# API_KEY เป็น secret ไม่ใช่ vars — ตั้งด้วย `npx wrangler secret put API_KEY`
+# ไม่ตั้ง = เปิดอ่านสาธารณะ (ดู README)

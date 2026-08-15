@@ -1,0 +1,9 @@
+[Unit]
+Description=adsb-station fill aircraft registration for sightings (hex -> reg lookup)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=arin
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/flightwatch/reg_lookup.py
