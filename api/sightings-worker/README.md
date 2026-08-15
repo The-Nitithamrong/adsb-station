@@ -58,23 +58,56 @@ curl "https://adsb-sightings-api.<subdomain>.workers.dev/sightings?date=2026-08-
 ### `GET /health`
 `{"ok": true}` — ไม่แตะ D1
 
-## Deploy
+## สถานะ: deploy แล้ว
+
+```
+https://adsb-sightings-api.happytohelp.workers.dev
+```
+
+ตาราง `sightings` ใน D1 `adsb` สร้างแล้ว และ `API_KEY` ตั้งเป็น secret แล้ว → **ต้องส่ง bearer เสมอ**
+(key อยู่นอก repo — ถ้าหายให้ตั้งใหม่ด้วยขั้นตอน "หมุน key" ข้างล่าง)
+
+```bash
+curl -H "Authorization: Bearer $ADSB_API_KEY" \
+     "https://adsb-sightings-api.happytohelp.workers.dev/sightings?limit=5"
+```
+
+## Deploy / แก้แล้ว deploy ใหม่
+
+`database_id` **ไม่ได้ commit** เพราะ repo นี้ public — `wrangler.toml` ที่อยู่ใน repo เป็น placeholder
+ให้ทำ config ตัวจริงไว้ในเครื่อง (gitignore ครอบ `api/*/wrangler.local.toml` ไว้แล้ว):
 
 ```bash
 cd api/sightings-worker
+npx wrangler d1 list                                    # เอา uuid ของ database ชื่อ adsb
+sed 's/PUT-D1-DATABASE-ID-HERE/<uuid>/' wrangler.toml > wrangler.local.toml
 
-# 1. ชี้ไป D1 ตัวเดิมที่ outbox ส่งขึ้นไป (id เดียวกับ D1_DATABASE_ID ใน /etc/fr24-watchdog.env)
-npx wrangler d1 list                       # เอา database_id มาใส่ใน wrangler.toml
-npx wrangler d1 execute adsb --remote --file=schema.sql     # สร้างตาราง (ครั้งเดียว)
-
-# 2. (optional) ล็อกด้วย bearer token — ไม่ตั้ง = ใครก็อ่านได้
-npx wrangler secret put API_KEY
-
-# 3. deploy
-npx wrangler deploy
+npx wrangler d1 execute adsb --remote --file=schema.sql  # ครั้งแรกครั้งเดียว (idempotent)
+npx wrangler deploy --config wrangler.local.toml
 ```
 
-**ต้องสร้างตารางใน D1 ก่อน** ถึงจะให้ Pi เริ่มส่ง ไม่งั้น `outbox` จะ log ว่าส่ง `sightings` ไม่สำเร็จทุก
+หมุน key: `npx wrangler secret put API_KEY --config wrangler.local.toml`
+(ลบ secret ทิ้ง = กลับไปเปิดอ่านสาธารณะ — โค้ดเช็ค `env.API_KEY` ว่ามีค่าไหมเท่านั้น)
+
+<details>
+<summary>ไม่มี wrangler / npm ใช้ไม่ได้ — deploy ผ่าน REST API ตรง ๆ ก็ได้</summary>
+
+```bash
+ACC=<account_id>; TOK=<api_token>; D1=<database_uuid>
+curl -X PUT "https://api.cloudflare.com/client/v4/accounts/$ACC/workers/scripts/adsb-sightings-api" \
+  -H "Authorization: Bearer $TOK" \
+  -F "metadata={\"main_module\":\"index.js\",\"compatibility_date\":\"2025-01-01\",\"bindings\":[{\"type\":\"d1\",\"name\":\"DB\",\"id\":\"$D1\"}]};type=application/json" \
+  -F "index.js=@src/index.js;type=application/javascript+module"
+
+curl -X PUT ".../workers/scripts/adsb-sightings-api/secrets" -H "Authorization: Bearer $TOK" \
+  -H "Content-Type: application/json" -d '{"name":"API_KEY","text":"<key>","type":"secret_text"}'
+curl -X POST ".../workers/scripts/adsb-sightings-api/subdomain" -H "Authorization: Bearer $TOK" \
+  -H "Content-Type: application/json" -d '{"enabled":true}'
+```
+หมายเหตุ: อัปโหลดสคริปต์ทับ **ไม่ลบ secret** (secret เป็น setting ของ script ไม่ใช่ของ bundle)
+</details>
+
+**ต้องมีตารางใน D1 ก่อน** ถึงจะให้ Pi เริ่มส่ง ไม่งั้น `outbox` จะ log ว่าส่ง `sightings` ไม่สำเร็จทุก
 10 นาที (ไม่กระทบ `events`/`tracks` — outbox กันไว้ทีละ table แล้ว) แถวที่ส่งไม่ผ่านจะคิวไว้และตามไปเอง
 เมื่อสร้างตารางเสร็จ ไม่มีข้อมูลหาย
 
