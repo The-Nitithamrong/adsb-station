@@ -23,6 +23,7 @@ CLEAR_SEC     = 300                       # ไม่เห็นเกินน
 HIST_MIN_SEC  = 15                        # เว้นระยะเวลาเก็บ dist/alt history อย่างน้อยเท่านี้ (ดู parse)
 VRATE_CLIMB_FPM = 300                     # vertical rate เกินนี้ = ไต่ขึ้น (ขาออก) → ตัดออกจาก inbound
 VRATE_DESC_FPM  = 200                     # vertical rate ต่ำกว่า -นี้ = ร่อนลง (ขาเข้า) โดยตรง
+OUTBOUND_NEAR_NM = 40                     # ขาออกต้องเคยเข้าใกล้ VTBS กว่านี้ (ไม่งั้นเป็นเครื่องบินผ่าน)
 # จุดเข้า STAR ของ VTBS (ทุกจุด FL180) — จากชาร์ต RNAV. ใช้ tag ว่าเครื่องเข้า arrival ทางไหน + กี่โมง
 STAR_FIXES = {
     "WILLA": (14.405, 100.060),   # NW  N14 24.3 E100 03.6
@@ -137,6 +138,23 @@ def is_inbound(p):
     descending = (vr is not None and vr < -VRATE_DESC_FPM) or (len(ah) >= 2 and ah[-1] <= ah[0])
     low = p.get("alt") is not None and p["alt"] < 25000
     return closing and (descending or low)
+
+def is_outbound(p):
+    """เพิ่งขึ้นจาก VTBS: ระยะห่างสนามเพิ่มขึ้น + กำลังไต่ + **เคยอยู่ใกล้สนามมาก่อน**
+    เงื่อนไขสุดท้ายสำคัญ: ถ้าไม่มี เครื่องบินผ่าน (overflight) ที่แค่บินห่างออกไปเรื่อย ๆ จะถูกนับเป็น
+    ขาออกหมด — ใช้ min_dist (ระยะใกล้สุดที่เคยเห็น) เป็นตัวบอกว่ามันขึ้นจากสนามนี้จริง"""
+    dh = p["dist_hist"]
+    if len(dh) < 3:
+        return False
+    if p.get("min_dist") is None or p["min_dist"] > OUTBOUND_NEAR_NM:
+        return False
+    vr = p.get("vrate")
+    if vr is not None and vr < -VRATE_DESC_FPM:
+        return False                       # ร่อนลงอยู่ = ขาเข้า ไม่ใช่ขาออก
+    leaving = dh[-1] > dh[0] + 1           # ระยะเพิ่มจริง (>1nm กันสั่น) วัดแบบเว้นเวลาเหมือน is_inbound
+    ah = p["alt_hist"]
+    climbing = (vr is not None and vr > VRATE_CLIMB_FPM) or (len(ah) >= 2 and ah[-1] > ah[0])
+    return leaving and climbing
 
 def eta_min(p):
     """ETA จากความสูง (ดีกว่าเส้นตรงสำหรับ STAR arrival): เหลือ ~ alt / descent_rate นาที.
@@ -384,6 +402,23 @@ def all_inbound(limit=30):
     out.sort(key=lambda x: x["eta_min"])
     return out[:limit]
 
+def all_outbound(limit=30):
+    """ทุกเครื่องที่เพิ่งขึ้นจาก VTBS ตอนนี้ (ทุกสายการบิน) เรียงใกล้สนามก่อน = เพิ่งขึ้นสุดอยู่บนสุด.
+    แยก key จาก inbound_all ตั้งใจ: eta_push อ่าน inbound_all เพื่อส่ง ETA ขาเข้าให้ busandgo —
+    ถ้าเอาขาออกไปยัดรวม เที่ยวขาออกจะถูกส่งเป็น ETA ขาเข้าทันที. ไม่มี eta_min เพราะขาออกไม่มี ETA
+    ที่มีความหมาย (มันกำลังออกจากสนาม ไม่ได้กำลังจะถึง)"""
+    out = []
+    for hexid, p in flights.items():
+        if p.get("dist") is None or p["dist"] > MAX_RANGE_NM or not is_outbound(p):
+            continue
+        out.append({"flight": p.get("callsign", "").strip() or hexid.upper(), "hex": hexid,
+                    "dist_nm": round(p["dist"], 1), "alt": p.get("alt"), "gs": p.get("gs"),
+                    "lat": round(p["lat"], 4) if p.get("lat") is not None else None,
+                    "lon": round(p["lon"], 4) if p.get("lon") is not None else None,
+                    "trk": p.get("trk")})
+    out.sort(key=lambda x: x["dist_nm"])
+    return out[:limit]
+
 def flights_list():
     """ทุกเครื่องที่มี position ตอนนี้ เรียงใกล้→ไกล (สำหรับหน้า list บน Pixoo)"""
     out = []
@@ -403,6 +438,7 @@ def write_inbound():
     data["nrx"] = len(lst)               # จำนวนเครื่องที่รับได้ทั้งหมด
     data["list"] = lst[:LIST_MAX]        # เฉพาะที่โชว์บนจอ
     data["inbound_all"] = all_inbound()  # ทุกสายการบินที่ inbound + ETA (ป้อน inbound_push → D1)
+    data["outbound_all"] = all_outbound()  # ทุกสายการบินที่เพิ่งขึ้นจาก VTBS (ป้อน inbound_push เท่านั้น)
     try:
         os.makedirs(os.path.dirname(INBOUND_FILE), exist_ok=True)
         tmp = INBOUND_FILE + ".tmp"

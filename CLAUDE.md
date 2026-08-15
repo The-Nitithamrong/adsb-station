@@ -115,16 +115,26 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   rather than a second `COUNT(*)` (D1 bills rows read). Writes stay with outbox's D1 REST token, which
   never leaves the Pi. `schema.sql` must be applied to D1 ONCE before the Pi starts pushing (see its
   README) — until then outbox logs a per-run `sightings` failure and queues the rows; nothing is lost.
-- `report/inbound_push.py` (+ `systemd/adsb-inbound-push.service`) — OPTIONAL: pushes ALL live inbound
-  aircraft (every airline, not just THA) + ETA to Cloudflare D1 table `inbound_live` every ~30s so an
-  EXTERNAL web app can show real-time ETA for many flights. Source = `inbound_all` in
-  `/run/flight-watcher/inbound.json` (flight_watcher's `all_inbound()` = `current_inbound` logic minus
-  the THA filter). Differs from outbox (history: append) — this is LIVE-only, MANY rows (1/aircraft,
-  PK `station+hex`): each cycle `INSERT OR REPLACE` the current set (push_ts=now) then
-  `DELETE ... push_ts < now` (drops departed aircraft, no empty gap). Daemon (Type=simple, reuses the
-  same `D1_*` creds + push pattern as heartbeat/outbox; stdlib). Create `inbound_live` once
-  (`INBOUND_SCHEMA` at file end). Web app reads via a Pages D1 binding —
-  `SELECT * FROM inbound_live WHERE station=? ORDER BY eta_min`.
+- `report/inbound_push.py` (+ `systemd/adsb-inbound-push.service`) — OPTIONAL: pushes ALL live traffic
+  (every airline, not just THA) to Cloudflare D1 table `inbound_live` every ~30s so an EXTERNAL web app
+  can show real-time arrivals AND departures. Source = `inbound_all` + `outbound_all` in
+  `/run/flight-watcher/inbound.json`, tagged with a `direction` column (`inbound`/`outbound`);
+  `eta_min` is NULL for outbound (a departing aircraft has no meaningful arrival ETA). Differs from
+  outbox (history: append) — this is LIVE-only, MANY rows (1/aircraft, PK `station+hex`): each cycle
+  `INSERT OR REPLACE` the current set (push_ts=now) then `DELETE ... push_ts < now` (drops aircraft
+  that left, no empty gap). DELETE runs only after every INSERT chunk succeeds — a half-written set
+  would show as a table with holes.
+  GOTCHA: D1 caps bound params at ~100/query, so rows MUST be chunked (`D1_MAX_PARAMS`, same as
+  outbox). Sending one INSERT for every aircraft worked at ~12 aircraft and then returned HTTP 400
+  `too many SQL variables` for every push once traffic hit 22 (12 cols × 22 = 264 params) — the table
+  sat empty for days while the log only said "ส่ง D1 ไม่สำเร็จ (เน็ตหลุด?)".
+  Daemon (Type=simple, reuses the same `D1_*` creds + push pattern as heartbeat/outbox; stdlib).
+  Create `inbound_live` once (`INBOUND_SCHEMA` at file end; ALTER lines there for older tables —
+  `ensure_table()` uses CREATE IF NOT EXISTS so it will NOT add columns to an existing table).
+  Web app reads via a Pages D1 binding —
+  `SELECT * FROM inbound_live WHERE station=? AND direction='inbound' ORDER BY eta_min`.
+  COST: rows-written scales with traffic × cycles — ~30 aircraft every 30s ≈ 86k row-writes/day,
+  close to D1's free-tier 100k/day. Raise `PUSH_INTERVAL_S` (env) to 60 to halve it.
 - `report/eta_push.py` (+ `systemd/adsb-eta-push.service`) — OPTIONAL: HTTP POST THA inbound ETA to the
   busandgo geofence/shuttle Cloudflare Worker (`/flights/eta`) every ~30s → feeds the crew-transport
   workflow (knows when a TG flight lands → geofence trigger). Differs from inbound_push (D1, ALL
@@ -250,6 +260,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   Plus `nrx`, `list` (Pixoo) and `inbound_all` — every inbound aircraft, any airline:
   `{flight, hex, eta_min, dist_nm, alt, gs, lat, lon, trk}` (`lat/lon` 4 dp ≈ 11 m; any field may be
   `null` until that SBS message type arrives). Consumers: inbound_push → D1, eta_push → worker.
+  And `outbound_all` — same shape minus `eta_min`, aircraft that just departed VTBS (`is_outbound`).
+  Kept as its OWN key, not merged into `inbound_all`, because eta_push reads `inbound_all` to push
+  arrival ETAs: a departure mixed in there would be pushed to busandgo as an inbound ETA.
 - `/run/agenda/next.json` — written by agenda_fetch (arin; via `RuntimeDirectory=agenda` +
   `RuntimeDirectoryPreserve=yes` so the oneshot's dir survives between runs):
   `{ts, summary, code, route, start_ts, start_str, in_min, all_day}` or `{ts, summary: null}` when no
