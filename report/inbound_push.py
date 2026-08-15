@@ -24,7 +24,12 @@ INBOUND_F = "/run/flight-watcher/inbound.json"
 PUSH_INTERVAL_S = int(os.environ.get("PUSH_INTERVAL_S", "30"))
 
 # ลำดับคอลัมน์ต่อเครื่อง = ลำดับใน INSERT (ต้องตรงกับ schema)
-COLS = ["station", "hex", "flight", "eta_min", "dist_nm", "alt", "gs", "push_ts"]
+COLS = ["station", "hex", "flight", "direction", "eta_min", "dist_nm", "alt", "gs",
+        "lat", "lon", "trk", "push_ts"]
+# D1 จำกัด bound params ~100/query → ต้องหั่นเป็นก้อน (เหมือน outbox.D1_MAX_PARAMS)
+# ของเดิมยัดทุกลำใน INSERT เดียว: ~12 ลำยังผ่าน แต่ชั่วโมงเร่งด่วน 22 ลำ = 176 params →
+# D1 ตอบ 400 "too many SQL variables" ทุกรอบ ตารางเลยว่างตลอด
+D1_MAX_PARAMS = 90
 
 
 def load_env(path):
@@ -42,20 +47,34 @@ def load_env(path):
 
 
 ENV = load_env(ENV_FILE)
-STATION = ENV.get("STATION_ID") or socket.gethostname()
-D1_ACC, D1_DB, D1_TOK = ENV.get("D1_ACCOUNT_ID"), ENV.get("D1_DATABASE_ID"), ENV.get("D1_API_TOKEN")
+
+
+def cfg(key, default=None):
+    """env ของ process (systemd EnvironmentFile) ก่อน แล้วค่อยอ่านไฟล์เอง — เหมือน outbox/heartbeat/
+    eta_push. ตัวนี้เป็น D1 script ตัวสุดท้ายที่ยังอ่านจากไฟล์อย่างเดียว ทำให้ทดสอบนอกเครื่องไม่ได้
+    และพังเงียบถ้าวันหนึ่งสิทธิ์ไฟล์เปลี่ยน"""
+    return os.environ.get(key) or ENV.get(key) or default
+
+
+STATION = cfg("STATION_ID") or socket.gethostname()
+D1_ACC, D1_DB, D1_TOK = cfg("D1_ACCOUNT_ID"), cfg("D1_DATABASE_ID"), cfg("D1_API_TOKEN")
 
 
 def log(*a):
     print(time.strftime("%F %T"), "inbound_push:", *a)
 
 
-def read_inbound_all():
+def read_live():
+    """inbound + outbound จากไฟล์เดียว ติดป้าย direction ให้แต่ละลำ.
+    ขาออกไม่มี eta_min (ไม่ได้กำลังจะถึง) → คอลัมน์นั้นเป็น NULL"""
     try:
         with open(INBOUND_F) as f:
-            return json.load(f).get("inbound_all", [])
+            d = json.load(f)
     except (OSError, ValueError):
         return []
+    rows = [dict(a, direction="inbound") for a in d.get("inbound_all", [])]
+    rows += [dict(a, direction="outbound", eta_min=None) for a in d.get("outbound_all", [])]
+    return rows
 
 
 def d1_query(sql, params):
@@ -80,17 +99,21 @@ def ensure_table():
 
 
 def push(rows):
-    """แทนที่ชุด inbound ปัจจุบันของสถานีใน D1 แบบไม่มีช่องว่าง (upsert ก่อน แล้วลบตัวเก่า)."""
+    """แทนที่ชุดเครื่องบินปัจจุบันของสถานีใน D1 แบบไม่มีช่องว่าง (upsert ก่อน แล้วลบตัวเก่า).
+    DELETE ทำหลัง INSERT ครบทุกก้อนเท่านั้น — ถ้าก้อนใดพัง exception จะเด้งออกไปก่อนถึง DELETE
+    ทำให้ตารางยังเป็นชุดเก่าทั้งชุด (ข้อมูลเก่า 30 วิ ดีกว่าตารางแหว่งครึ่ง ๆ)"""
     now = int(time.time())
-    if rows:
-        cell = "(" + ",".join(["?"] * len(COLS)) + ")"
-        tuples, params = [], []
-        for r in rows:
-            tuples.append(cell)
-            params += [STATION, r.get("hex"), r.get("flight"), r.get("eta_min"),
-                       r.get("dist_nm"), r.get("alt"), r.get("gs"), now]
-        d1_query(f"INSERT OR REPLACE INTO inbound_live ({','.join(COLS)}) VALUES {','.join(tuples)}",
-                 params)
+    per = max(1, D1_MAX_PARAMS // len(COLS))
+    cell = "(" + ",".join(["?"] * len(COLS)) + ")"
+    for i in range(0, len(rows), per):
+        chunk = rows[i:i + per]
+        params = []
+        for r in chunk:
+            params += [STATION, r.get("hex"), r.get("flight"), r.get("direction"),
+                       r.get("eta_min"), r.get("dist_nm"), r.get("alt"), r.get("gs"),
+                       r.get("lat"), r.get("lon"), r.get("trk"), now]
+        d1_query(f"INSERT OR REPLACE INTO inbound_live ({','.join(COLS)}) VALUES "
+                 f"{','.join([cell] * len(chunk))}", params)
     d1_query("DELETE FROM inbound_live WHERE station = ? AND push_ts < ?", [STATION, now])
 
 
@@ -113,7 +136,7 @@ def main():
                 ensure_table()
                 table_ready = True
                 log("ตาราง inbound_live พร้อม")
-            push(read_inbound_all())
+            push(read_live())
         except (urllib.error.URLError, OSError, RuntimeError, TimeoutError) as e:
             log("ส่ง D1 ไม่สำเร็จ (เน็ตหลุด?) — ข้ามรอบนี้:", e)   # ไม่ crash รอบหน้าค่อยส่งใหม่
         for _ in range(PUSH_INTERVAL_S):     # sleep แบบตอบ SIGTERM ไว
@@ -125,12 +148,17 @@ def main():
 # สร้างตารางใน D1 ครั้งเดียวก่อนใช้ (wrangler d1 execute <db> --remote --command "..."):
 INBOUND_SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbound_live (
-  station TEXT, hex TEXT, flight TEXT, eta_min REAL, dist_nm REAL,
-  alt INTEGER, gs INTEGER, push_ts INTEGER,
+  station TEXT, hex TEXT, flight TEXT, direction TEXT, eta_min REAL, dist_nm REAL,
+  alt INTEGER, gs INTEGER, lat REAL, lon REAL, trk INTEGER, push_ts INTEGER,
   PRIMARY KEY (station, hex)
 );
 CREATE INDEX IF NOT EXISTS idx_inbound_live_station ON inbound_live(station, eta_min);
 """
+# ตารางที่สร้างไว้ก่อนมีคอลัมน์พวกนี้ (ensure_table ใช้ CREATE IF NOT EXISTS จึงไม่เพิ่มให้เอง):
+#   ALTER TABLE inbound_live ADD COLUMN direction TEXT;   -- inbound / outbound
+#   ALTER TABLE inbound_live ADD COLUMN lat REAL;
+#   ALTER TABLE inbound_live ADD COLUMN lon REAL;
+#   ALTER TABLE inbound_live ADD COLUMN trk INTEGER;
 
 if __name__ == "__main__":
     main()
