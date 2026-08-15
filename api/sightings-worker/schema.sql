@@ -23,8 +23,9 @@ CREATE TABLE IF NOT EXISTS sightings (
 -- ALTER TABLE sightings ADD COLUMN alt_ft INTEGER;
 -- ALTER TABLE sightings ADD COLUMN gs_kt INTEGER;
 
--- คิวรีที่ API ใช้จริง: กรองตามวัน / เที่ยวบิน / ทะเบียน แล้วเรียงตามเวลา
-CREATE INDEX IF NOT EXISTS sightings_day    ON sightings(day);
+-- คิวรีที่ API ใช้จริง: กรองตามช่วงเวลา / เที่ยวบิน / ทะเบียน
+-- จงใจไม่มี index บน `day`: ทุก endpoint กรองด้วยหน้าต่าง first_seen_ts (เพื่อตัดวันตาม timezone
+-- ของผู้ใช้) ไม่เคยกรองด้วย day เลย — index ที่ไม่มีใครใช้ = ค่าเขียนเพิ่มต่อแถวฟรี ๆ ทุกวัน
 CREATE INDEX IF NOT EXISTS sightings_flight ON sightings(flight);
 CREATE INDEX IF NOT EXISTS sightings_reg    ON sightings(reg);
 CREATE INDEX IF NOT EXISTS sightings_ts     ON sightings(first_seen_ts);
