@@ -153,8 +153,14 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `ensure_table()` uses CREATE IF NOT EXISTS so it will NOT add columns to an existing table).
   Web app reads via a Pages D1 binding —
   `SELECT * FROM inbound_live WHERE station=? AND direction='inbound' ORDER BY eta_min`.
-  COST: rows-written scales with traffic × cycles — ~30 aircraft every 30s ≈ 86k row-writes/day,
-  close to D1's free-tier 100k/day. Raise `PUSH_INTERVAL_S` (env) to 60 to halve it.
+  COST (measured, not estimated — from D1 GraphQL analytics `d1AnalyticsAdaptiveGroups`): this table
+  rewrites its whole row set every cycle, so writes = rows × cycles/day × (1 + indexes). At 36 aircraft
+  on a 30s cycle that was ~9,700 rows-written/HOUR ≈ 233k/day — 2.3× over D1's free-tier 100k/day, and
+  the cap is per-DATABASE, so blowing it takes outbox/heartbeat/sightings down too, not just this table.
+  Two fixes applied: default `PUSH_INTERVAL_S` 30 → 60, and DROP the secondary index. D1 counts index
+  writes as rows written, so an index on a table this small costs a full extra write per row per cycle
+  while saving nothing (a few dozen rows scan instantly, and rows-READ is identical either way).
+  Together ≈ 78k/day. Any new index here is a standing daily cost — think before adding one.
 - `report/eta_push.py` (+ `systemd/adsb-eta-push.service`) — OPTIONAL: HTTP POST THA inbound ETA to the
   busandgo geofence/shuttle Cloudflare Worker (`/flights/eta`) every ~30s → feeds the crew-transport
   workflow (knows when a TG flight lands → geofence trigger). Differs from inbound_push (D1, ALL

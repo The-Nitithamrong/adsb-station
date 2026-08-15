@@ -21,7 +21,13 @@ import urllib.request
 
 ENV_FILE = "/etc/fr24-watchdog.env"
 INBOUND_F = "/run/flight-watcher/inbound.json"
-PUSH_INTERVAL_S = int(os.environ.get("PUSH_INTERVAL_S", "30"))
+# ทุกรอบเขียนทุกแถวใหม่ทั้งชุด → ค่าเขียนต่อวัน = แถว × รอบ/วัน × (1 + จำนวน index)
+# วัดจริงจาก D1 analytics: 36 แถว ที่ 30 วิ = ~9,700 rows-written/ชม. = ~233k/วัน ซึ่งเกิน
+# เพดาน free tier (100k/วัน) อยู่ 2.3 เท่า และ D1 ตัวเดียวกันนี้ outbox/heartbeat/sightings ใช้ร่วม
+# → ชนเพดานเมื่อไร ทุกตัวเขียนไม่ได้หมด ไม่ใช่แค่ตารางนี้
+# 60 วิ = ครึ่งหนึ่ง + ลบ index ที่ไม่จำเป็นออก (เหลือ PK อย่างเดียว) = ~78k/วัน พออยู่ในโควตา
+# ETA คิดเป็นนาทีอยู่แล้ว ช้าลง 30 วิจึงไม่เปลี่ยนสิ่งที่ผู้ใช้เห็น ตั้ง env ทับได้ถ้าอยากถี่กว่านี้
+PUSH_INTERVAL_S = int(os.environ.get("PUSH_INTERVAL_S", "60"))
 
 # ลำดับคอลัมน์ต่อเครื่อง = ลำดับใน INSERT (ต้องตรงกับ schema)
 COLS = ["station", "hex", "flight", "direction", "eta_min", "dist_nm", "alt", "gs",
@@ -152,8 +158,11 @@ CREATE TABLE IF NOT EXISTS inbound_live (
   alt INTEGER, gs INTEGER, lat REAL, lon REAL, trk INTEGER, push_ts INTEGER,
   PRIMARY KEY (station, hex)
 );
-CREATE INDEX IF NOT EXISTS idx_inbound_live_station ON inbound_live(station, eta_min);
 """
+# จงใจไม่มี index อื่นนอกจาก PK: ตารางนี้เก็บแค่ "เครื่องที่บินอยู่ตอนนี้" ไม่กี่สิบแถว การ scan
+# ทั้งตารางเร็วกว่าที่ index จะคุ้ม และ D1 นับ rows-written รวม index ด้วย → index ทุกตัวคือค่าเขียน
+# เพิ่มอีกหนึ่งเท่าทุกรอบตลอดวัน (เคยมี idx_inbound_live_station(station,eta_min) แล้วลบทิ้งไป)
+# rows-read ไม่ต่างกันเพราะยังไงก็อ่านครบทุกแถว
 # ตารางที่สร้างไว้ก่อนมีคอลัมน์พวกนี้ (ensure_table ใช้ CREATE IF NOT EXISTS จึงไม่เพิ่มให้เอง):
 #   ALTER TABLE inbound_live ADD COLUMN direction TEXT;   -- inbound / outbound
 #   ALTER TABLE inbound_live ADD COLUMN lat REAL;
