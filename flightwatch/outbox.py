@@ -66,9 +66,11 @@ TABLES = {
     # where: ข้ามแถวที่ reg_lookup ยังไม่แตะ (reg_state=0) — ส่งขึ้นไปครั้งเดียวตอนข้อมูลนิ่งแล้ว
     # (D1 ใช้ INSERT OR IGNORE = ส่งซ้ำไม่อัปเดตของเดิม ถ้าส่งตอน reg ยังว่างทะเบียนจะไม่มีวันตามไปเติม)
     "sightings": {
-        "cols": ["day", "flight", "hex", "first_seen_ts", "first_seen_utc", "reg"],
+        "cols": ["day", "flight", "hex", "first_seen_ts", "first_seen_utc", "reg",
+                 "lat", "lon", "alt_ft", "gs_kt"],
         "uid": lambda d: f"{STATION}:{d['day']}:{d['flight']}:{d['hex']}",
-        "where": "reg_state != 0",
+        # ต้องเติมครบทั้งทะเบียนและตำแหน่งก่อน (pos_state 2 = ไม่เคยส่งพิกัดจนหายไป ก็ถือว่าจบแล้ว)
+        "where": "reg_state != 0 AND pos_state != 0",
     },
 }
 

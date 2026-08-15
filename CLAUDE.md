@@ -39,11 +39,20 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   and on prune writes a per-flight row to the `tracks` table (closest approach + alt there, etc.).
   Also fills the `sightings` catalog: 1 row per `UNIQUE(day, flight, hex)` — day = UTC day, `flight` =
   callsign, `hex` = ICAO 24-bit, `first_seen_ts/_utc` = when that aircraft's FIRST message arrived (not
-  when the callsign showed up — callsign rides MSG type 1, seconds later). Written once per in-memory
-  state via `p["logged"]`, but correctness rests on the UNIQUE index: state is dropped after
-  `CLEAR_SEC`, so an aircraft that leaves and returns re-fires the INSERT — `INSERT OR IGNORE` keeps the
-  earliest row. `reg` is ALWAYS NULL here (`reg_state`=0): ADS-B carries no registration, only hex —
-  `reg_lookup.py` fills it. Never look it up inline: `parse()` is the socket hot loop.
+  when the callsign showed up — callsign rides MSG type 1, seconds later), plus `lat/lon/alt_ft/gs_kt`
+  = the state AT first sighting (not latest — this is what makes it a coverage record). Correctness
+  rests on the UNIQUE index, not on memory: state is dropped after `CLEAR_SEC`, so an aircraft that
+  leaves and returns re-fires the INSERT — `INSERT OR IGNORE` keeps the earliest row.
+  `p["logged_cs"]` holds the callsign already written, NOT a bool: a weak signal decodes partial
+  callsigns (observed a bare `"N"`), and the old bool latched that wrong name in forever. Now a
+  callsign shorter than `MIN_CALLSIGN_LEN` is ignored, and a LATER different callsign writes its own
+  row (`flight` is part of the key) — a duplicate beats a permanently wrong name.
+  Two fields arrive late and are filled by a single UPDATE each, tracked by `pos_state`
+  (0 pending → 1 filled → 2 aircraft left without ever sending position):
+  position (`fill_sighting_pos`, since callsign usually precedes position) and `reg`
+  (`reg_lookup.py` — ADS-B carries no registration, only hex; never look it up inline, `parse()` is the
+  socket hot loop). outbox ships only rows where BOTH are settled, because its D1 sink is
+  INSERT OR IGNORE and could never correct a row sent early.
   GOTCHA (`is_inbound`): "closing" is judged from `dist_hist` spaced by TIME (`HIST_MIN_SEC`=15s), NOT
   by fix count — dump1090 sends many msg/s AND `lat/lon` persist in state so `dist_hist` was appended on
   EVERY message (~10/s), making the last-6 window span <1s → distance barely changes → `closing` (needs
@@ -91,13 +100,17 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   column to each table (idempotent ALTER — does NOT touch flight_watcher), marks rows sent; unsent rows
   queue and retry (survives connectivity gaps). D1 side: `uid` PK + `INSERT OR IGNORE` = idempotent on
   re-send. Pluggable — add a sink `send(table,cols,rows)->count` to `SINKS` (e.g. Dataverse later).
-  Per-table `where` = extra "ready to send" gate (`sightings` uses `reg_state != 0`) — needed BECAUSE
-  the sink is INSERT OR IGNORE: a row sent while `reg` is still NULL could never be corrected later.
+  Per-table `where` = extra "ready to send" gate (`sightings` uses `reg_state != 0 AND pos_state != 0`)
+  — needed BECAUSE the sink is INSERT OR IGNORE: a row sent while `reg`/position are still NULL could
+  never be corrected later. GOTCHA: `main()`'s per-table loop var must NOT be named `cfg` — that
+  shadows the module-level `cfg()` env helper and makes it local to the whole function
+  (`UnboundLocalError` on the first call). It is `tcfg`.
   D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
 - `api/sightings-worker/` — READ-ONLY Cloudflare Worker serving the `sightings` catalog over HTTP:
   `GET /sightings?date=&from=&to=&flight=&reg=&hex=&station=&limit=&offset=&order=` → `{count, limit,
   offset, has_more, results:[{flight_number, registration, first_seen_utc, first_seen_ts, day, hex,
-  station}]}`, plus `/health`. All caller values are bound params (no SQL string building); CORS `*`;
+  station, lat, lon, altitude_ft, ground_speed_kt}]}`, plus `/health`. Deployed at
+  `adsb-sightings-api.happytohelp.workers.dev`; `API_KEY` secret is SET so a bearer is required. All caller values are bound params (no SQL string building); CORS `*`;
   optional bearer via a `API_KEY` secret (unset = public read). `has_more` = "got exactly `limit` rows"
   rather than a second `COUNT(*)` (D1 bills rows read). Writes stay with outbox's D1 REST token, which
   never leaves the Pi. `schema.sql` must be applied to D1 ONCE before the Pi starts pushing (see its

@@ -72,7 +72,8 @@ async function sightings(env, url) {
   const order = q.get("order") === "asc" ? "ASC" : "DESC";
 
   const rows = await env.DB.prepare(
-    `SELECT day, flight, reg, hex, first_seen_utc, first_seen_ts, station
+    `SELECT day, flight, reg, hex, first_seen_utc, first_seen_ts, station,
+            lat, lon, alt_ft, gs_kt
        FROM sightings${whereSql}
       ORDER BY first_seen_ts ${order}
       LIMIT ? OFFSET ?`,
@@ -86,6 +87,11 @@ async function sightings(env, url) {
     day: r.day,
     hex: r.hex,
     station: r.station,
+    // สภาพ ณ ตอนเห็นครั้งแรก (null = ลำนั้นไม่เคยส่งค่านั้นมาตอนอยู่ในระยะ)
+    lat: r.lat,
+    lon: r.lon,
+    altitude_ft: r.alt_ft,
+    ground_speed_kt: r.gs_kt,
   }));
 
   // has_more จากจำนวนที่ได้จริง — ไม่ต้องยิง COUNT(*) อีกรอบ (D1 คิดเงินตามแถวที่อ่าน)

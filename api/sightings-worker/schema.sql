@@ -10,8 +10,18 @@ CREATE TABLE IF NOT EXISTS sightings (
   hex            TEXT,               -- ICAO 24-bit address (ID จริงของลำ)
   first_seen_ts  INTEGER,            -- epoch วินาที
   first_seen_utc TEXT,               -- "YYYY-MM-DDTHH:MM:SSZ"
-  reg            TEXT                -- ทะเบียน เช่น "HS-TKF"; NULL = หาไม่เจอในฐานทะเบียน
+  reg            TEXT,               -- ทะเบียน เช่น "HS-TKF"; NULL = หาไม่เจอในฐานทะเบียน
+  -- สภาพ ณ ตอนเห็นครั้งแรก (ไม่ใช่ค่าล่าสุด) — NULL = ลำนั้นไม่เคยส่งค่านั้นตอนอยู่ในระยะ
+  lat            REAL,
+  lon            REAL,
+  alt_ft         INTEGER,
+  gs_kt          INTEGER
 );
+-- ตารางที่สร้างไว้ก่อนมี 4 คอลัมน์นี้: รันทีละบรรทัด ข้าม error "duplicate column" ได้
+-- ALTER TABLE sightings ADD COLUMN lat REAL;
+-- ALTER TABLE sightings ADD COLUMN lon REAL;
+-- ALTER TABLE sightings ADD COLUMN alt_ft INTEGER;
+-- ALTER TABLE sightings ADD COLUMN gs_kt INTEGER;
 
 -- คิวรีที่ API ใช้จริง: กรองตามวัน / เที่ยวบิน / ทะเบียน แล้วเรียงตามเวลา
 CREATE INDEX IF NOT EXISTS sightings_day    ON sightings(day);
