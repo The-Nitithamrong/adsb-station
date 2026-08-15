@@ -4,10 +4,13 @@
 # ⚠️ เดิม automation นี้อยู่บน HA ของ Pi#1 — ย้าย HA ไป Pi#2 แล้วไม่ได้สร้างใหม่ → ไม่มีใครสั่งปิด →
 #    พัดลมค้าง on (digest โชว์ "พัดลม 24ชม"). ไฟล์นี้เก็บใน repo แล้ว กันหายอีกตอนย้ายครั้งหน้า.
 #
-# ⚠️ แก้ 2 ค่าให้ตรงของจริง (ห้ามเดา — ดูคำสั่งพิมพ์ค่าจริงใน MIGRATE_HA_TO_PI2.md / คุยในแชต):
-#   - sensor.ads_b_arin_cpu_temperature : entity CPU temp ของ Pi#1 (device "ADS-B <host>" slugify;
-#       ถ้า STATION_ID=pi-adsb จะเป็น sensor.ads_b_pi_adsb_cpu_temperature — copy จาก Developer Tools → States)
-#   - switch.YOUR_FAN_SWITCH : switch Tuya ของ "พัดลม" จริง (คนละตัวกับปลั๊กไฟ Pi#1 = switch.pi_socket_1)
+# ค่า 2 ตัวข้างล่างเป็นของสถานีปัจจุบัน (STATION=Arin) — ยืนยันจากเครื่องจริงแล้ว วางใช้ได้เลย:
+#   - sensor.ads_b_arin_cpu_temperature : CPU temp ของ Pi#1 (มาจาก device "ADS-B <STATION>" ที่ HA slugify)
+#       เปลี่ยน STATION_ID เมื่อไรต้องแก้ตาม เช่น pi-adsb → sensor.ads_b_pi_adsb_cpu_temperature
+#       ห้ามเดา — copy จาก Developer Tools → States (ใส่ผิดตัว = เงื่อนไขเป็น False เงียบ ๆ ไม่ฟ้อง error)
+#   - switch.pi_fan_socket_1 : ปลั๊ก Tuya ของ "พัดลม"
+#       ⚠️ ห้ามสลับกับ switch.pi_socket_1 ซึ่งเป็นปลั๊กไฟของ Pi#1 เอง — ใส่ผิดตัวแปลว่าพอ CPU
+#          เย็นลงต่ำกว่า 52°C ระบบจะสั่งตัดไฟ Pi ตัวเอง
 # ปรับ threshold ได้: เปิดที่ above, ปิดที่ below (ต่างกัน = hysteresis กันเปิด-ปิดถี่)
 #
 # กันค้าง (สำคัญ): numeric_state จุดชนวนเฉพาะตอน "ข้าม" เกณฑ์ — ถ้าพลาด edge (HA รีสตาร์ท/sensor หาย)
@@ -35,7 +38,7 @@ action:
         sequence:
           - service: switch.turn_on
             target:
-              entity_id: switch.YOUR_FAN_SWITCH
+              entity_id: switch.pi_fan_socket_1
       # เย็น (<52°C) → ปิดพัดลม
       - conditions:
           - condition: numeric_state
@@ -44,5 +47,5 @@ action:
         sequence:
           - service: switch.turn_off
             target:
-              entity_id: switch.YOUR_FAN_SWITCH
+              entity_id: switch.pi_fan_socket_1
     # temp 52-60 (โซน hysteresis) → ไม่แตะ คงสถานะเดิม
