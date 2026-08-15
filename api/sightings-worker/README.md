@@ -19,46 +19,57 @@ Pi: flight_watcher ──เขียน──> SQLite sightings (reg=NULL, reg_
 
 ## Endpoints
 
-### `GET /sightings`
+ทุก endpoint ตัด "วัน" ตาม **เวลาท้องถิ่น** ไม่ใช่ UTC — `tz` default `+07:00`
 
-| param | ตัวอย่าง | ความหมาย |
-|---|---|---|
-| `date` | `2026-08-10` | วัน UTC (ตรงตัว) |
-| `from` / `to` | `2026-08-01` | ช่วงวัน UTC |
-| `flight` | `THA476` | callsign (case-insensitive) |
-| `reg` | `HS-TKF` | ทะเบียน (case-insensitive) |
-| `hex` | `8801f2` | ICAO 24-bit |
-| `station` | `Arin` | สถานี (เผื่ออนาคตมีหลายตัว) |
-| `limit` | `200` | default 200, สูงสุด 1000 |
-| `offset` | `0` | สำหรับหน้าถัดไป |
-| `order` | `asc` | เรียงตามเวลา, default `desc` |
+> **ทำไมต้องมี `tz`**: คอลัมน์ `day` ใน DB เป็นวัน UTC ถ้า match ตรง ๆ คนไทยที่ถามว่า "วันที่ 15"
+> จะได้ช่วง 07:00 ของวันที่ 15 ถึง 07:00 ของวันที่ 16 ตามเวลาไทย (เที่ยวบินตี 1–7 โมงเช้าหายไปอยู่วันก่อนหน้า)
+> ทุก endpoint จึงแปลง `date`+`tz` เป็นช่วง epoch แล้วค้นด้วย `first_seen_ts` และ
+> **ตอบ `window_utc` กลับมาเสมอ** ให้ผู้เรียกตรวจได้ว่าได้ช่วงไหนมาจริง ๆ
 
+พารามิเตอร์ร่วม: `date` · `from`/`to` (ช่วงวัน, รวมวันสุดท้ายด้วย) · `tz` · `airline` (prefix ของ
+callsign) · `flight` · `reg` · `hex` · `station` · `limit` (default 1000, สูงสุด 5000)
+
+### `GET /flights` — "วันนั้นมีเที่ยวบินอะไรบ้าง"
+1 แถวต่อ 1 เที่ยวบิน (เป็น default ของ `/` ด้วย)
 ```bash
-curl "https://adsb-sightings-api.<subdomain>.workers.dev/sightings?date=2026-08-10&limit=3"
+curl -H "Authorization: Bearer $ADSB_API_KEY" \
+  "https://adsb-sightings-api.happytohelp.workers.dev/flights?date=2026-08-15&airline=THA"
 ```
-
 ```json
 {
-  "count": 3, "limit": 3, "offset": 0, "has_more": true,
-  "results": [
-    { "flight_number": "THA476",
-      "registration": "HS-TKF",
-      "first_seen_utc": "2026-08-10T13:07:42Z",
-      "first_seen_ts": 1786000062,
-      "day": "2026-08-10",
-      "hex": "8801f2",
-      "station": "Arin",
-      "lat": 12.8116, "lon": 101.7511,
-      "altitude_ft": 30350, "ground_speed_kt": 428 }
+  "tz": "+07:00", "date": "2026-08-15",
+  "window_utc": { "from": "2026-08-14T17:00:00Z", "to": "2026-08-15T17:00:00Z" },
+  "count": 135,
+  "flights": [
+    { "flight_number": "THA476", "registration": "HS-TKF", "registrations": ["HS-TKF"],
+      "aircraft": 1, "first_seen_utc": "2026-08-15T03:38:44Z",
+      "first_seen_local": "2026-08-15 10:38", "first_seen_ts": 1786765124, "sightings": 1 }
   ]
 }
 ```
+~1,200 เที่ยว/วัน อยู่ใน `limit` default → ขอทั้งวันได้ในรอบเดียว ไม่ต้องไล่ paginate
 
-`lat`/`lon`/`altitude_ft`/`ground_speed_kt` = สภาพ **ตอนเห็นครั้งแรก** ไม่ใช่ค่าล่าสุด — บอกว่าสถานีเริ่ม
-รับลำนี้ได้ที่ตรงไหน สูงเท่าไร (ใช้ดู coverage ได้) `null` = ลำนั้นไม่เคยส่งค่านั้นมาเลยตอนอยู่ในระยะ
+### `GET /aircraft` — 1 แถวต่อ 1 ลำ + เที่ยวที่มันบิน
+`?transit=1` = เอาเฉพาะลำที่บินมากกว่า 1 เที่ยวในช่วงนั้น (ลงกรุงเทพแล้วบินออกเป็นอีกเที่ยว)
+```json
+{ "hex": "880456", "registration": "HS-ABV",
+  "flight_numbers": ["AIQ3511", "AIQ3225"], "flights": 2,
+  "first_seen_utc": "2026-08-15T03:38:40Z", "last_seen_utc": "2026-08-15T04:38:16Z",
+  "span_min": 59 }
+```
+**อ่าน `span_min` ด้วยเสมอ**: turnaround จริงกินเวลาเป็นสิบนาทีขึ้นไป (ตัวอย่างนี้ 59 นาที)
+ส่วน `span_min` ใกล้ 0 = ลำเดียวรายงานสอง callsign ในวินาทีเดียวกัน ซึ่งเป็นไปไม่ได้ →
+เป็นสัญญาณรบกวน (ADS-B bit error ทำให้ข้อความของอีกลำหลุดมาเป็น hex นี้) ไม่ใช่ transit
 
-`has_more` มาจาก "ได้แถวเต็ม limit พอดี" ไม่ได้ยิง `COUNT(*)` ซ้ำ (D1 คิดเงินตามแถวที่อ่าน)
-— หน้าถัดไปใช้ `offset` เพิ่มไปทีละ `limit`
+### `GET /days` — นับต่อวัน
+ไว้ทำตัวเลือกวันโดยไม่ต้องดึงข้อมูลทั้งวันมานับเอง
+```json
+{ "days": [ { "date": "2026-08-15", "sightings": 148, "flights": 135, "aircraft": 132 } ] }
+```
+
+### `GET /sightings` — แถวดิบ
+เหมือน `/flights` แต่ไม่ยุบ 1 แถว/เที่ยว และมีพิกัด/ความสูง/ความเร็ว ณ ตอนเห็นครั้งแรกครบ
+รองรับ `offset` + `has_more` สำหรับดึงทีละหน้า
 
 ### `GET /health`
 `{"ok": true}` — ไม่แตะ D1

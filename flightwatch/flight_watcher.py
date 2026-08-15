@@ -44,6 +44,7 @@ LIST_MAX = 5                              # กี่เครื่องใน
 TRACK_NEAR_NM = 60                        # บันทึก track เฉพาะเที่ยวที่เข้าใกล้ VTBS <= นี้ (approach/arrival; กัน overflight ไกล)
 TRACK_MIN_SAMPLES = 5                     # ต้องมี position fix อย่างน้อยเท่านี้ถึงบันทึก (กัน noise)
 MIN_CALLSIGN_LEN = 3                      # สั้นกว่านี้ = decode ไม่ครบ (เคยได้ "N" ตัวเดียว) ไม่ลง sightings
+MIN_CALLSIGN_HITS = 2                     # callsign ที่เปลี่ยนกลาง contact ต้องได้ยินซ้ำกี่ครั้งถึงเชื่อ
 FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15, "vrate": 16}
 
 # ---------- Telegram (reuse env เดิม) ----------
@@ -180,7 +181,9 @@ def parse(line):
                                    "alt_at_min": None, "min_alt": None, "max_dist": None,
                                    "alert_ts": None, "alert_eta": None, "last_hist_ts": 0,
                                    "star_fix": None, "star_alt": None, "star_ts": None,
-                                   "seen_ts": None, "logged_cs": None, "pos_state": 0})
+                                   "seen_ts": None, "logged_cs": None, "pos_state": 0,
+                                   "cs_pending": None, "cs_hits": 0,
+                                   "logged_ts": 0})
     for k, i in FIELDS.items():
         v = f[i].strip()
         if not v:
@@ -199,14 +202,25 @@ def parse(line):
     # callsign มาใน MSG type 1 ซึ่งมักช้ากว่าข้อความแรกไม่กี่วินาที — พอรู้ชื่อเที่ยวบินแล้วค่อยลงแคตตาล็อก
     # (first_seen ยังใช้เวลาที่เห็นลำนี้ครั้งแรกจริง ๆ ไม่ใช่เวลาที่ callsign โผล่)
     cs = p["callsign"].strip()
-    # กัน callsign ที่ decode ไม่ครบ: สัญญาณอ่อนเคยให้ "N" ตัวเดียวมาแล้ว (ลำนั้นเลยจมอยู่ใน catalog
-    # ด้วยชื่อผิดถาวร เพราะเดิมบันทึกครั้งเดียวแล้วปิดสวิตช์). ของจริงสั้นสุดคือ 3 ตัว
+    # กัน callsign ที่ decode ไม่ครบ: สัญญาณอ่อนเคยให้ "N" ตัวเดียวมาแล้ว. ของจริงสั้นสุดคือ 3 ตัว
     if len(cs) >= MIN_CALLSIGN_LEN and cs != p["logged_cs"]:
-        # เปลี่ยนจากที่เคยบันทึก = decode ครบขึ้น (หรือเปลี่ยน callsign จริง) → ลงแถวใหม่ตามชื่อใหม่
-        # แถวเก่าที่ผิดคงอยู่ (UNIQUE key มี flight อยู่ด้วย) — ยอมให้ซ้ำ ดีกว่าปล่อยให้ชื่อผิดค้างอย่างเดียว
-        record_sighting(hexid, p, cs)
-        p["logged_cs"] = cs
-        p["pos_state"] = 1 if (p.get("lat") is not None and p.get("lon") is not None) else 0
+        if p["logged_cs"] is None:
+            # ชื่อแรกของ contact นี้ — ลงเลย ใช้เวลาที่ได้ยินลำนี้ครั้งแรก (callsign มักตามมาไม่กี่วินาที)
+            record_sighting(hexid, p, cs, int(p["seen_ts"]))
+            p["logged_cs"], p["pos_state"] = cs, _has_pos(p)
+        else:
+            # เปลี่ยนชื่อ "กลางการติดต่อเดียวกัน" — ของจริงไม่เกิด (เครื่องไม่เปลี่ยน callsign กลางอากาศ)
+            # ข้อมูลจริงจากสถานี: คู่แบบนี้คือ bit error ที่ทำให้ข้อความของอีกลำหลุดมาเป็น hex เรานี้
+            # (เห็นเป็นคู่ hex ที่ต่างกันบิตเดียว เช่น 781BB5/781FB5 และตำแหน่งขัดกันในวินาทีเดียวกัน)
+            # → ต้องได้ยินชื่อใหม่ซ้ำอย่างน้อย MIN_CALLSIGN_HITS ครั้งถึงจะเชื่อ (ข้อความเพี้ยนไม่ค่อยซ้ำเป๊ะ)
+            # ถ้าเครื่องลำเดิมกลับมาใหม่คนละ contact (transit: ลงแล้วบินออกเป็นอีกเที่ยว) state ถูกล้าง
+            # ไปแล้ว → logged_cs=None → เข้าทางบนและได้แถวใหม่ตามที่ควร
+            p["cs_hits"] = p["cs_hits"] + 1 if cs == p["cs_pending"] else 1
+            p["cs_pending"] = cs
+            if p["cs_hits"] >= MIN_CALLSIGN_HITS:
+                record_sighting(hexid, p, cs, int(p["ts"]))   # ชื่อนี้เพิ่งเห็นเดี๋ยวนี้ ไม่ใช่ตอนต้น contact
+                p["logged_cs"], p["pos_state"] = cs, _has_pos(p)
+                p["cs_pending"], p["cs_hits"] = None, 0
 
     # อัปเดตระยะเมื่อมี position ใหม่
     if p["lat"] is not None and p["lon"] is not None:
@@ -280,17 +294,23 @@ def check(hexid, p):
                     round(p["dist"], 1), p["gs"], p["alt"]))
         db.commit()
 
-def sighting_day(p):
-    return time.strftime("%Y-%m-%d", time.gmtime(int(p.get("seen_ts") or p.get("ts") or time.time())))
+def _has_pos(p):
+    return 1 if (p.get("lat") is not None and p.get("lon") is not None) else 0
 
-def record_sighting(hexid, p, cs):
+def sighting_day(p):
+    """วันของแถวที่บันทึกไว้ล่าสุดของ state นี้ (ใช้เป็น key ตอน UPDATE เติมพิกัด)"""
+    return time.strftime("%Y-%m-%d", time.gmtime(p["logged_ts"]))
+
+def record_sighting(hexid, p, cs, ts):
     """ลงแคตตาล็อก 1 แถวต่อ (วัน UTC, เที่ยวบิน, ลำ) — เห็นครั้งแรกเมื่อไร + อยู่ที่ไหนตอนนั้น.
     UTC ไม่ใช่เวลาไทย: ผู้บริโภคเป็น API ภายนอก + ตรงกับ ts อื่น ๆ ในระบบ (day ก็ตัดตามวัน UTC).
     INSERT OR IGNORE + UNIQUE(day,flight,hex) → เจอลำเดิมซ้ำทั้งวันก็ยังแถวเดียว และเวลาที่เก็บไว้
     เป็นครั้งแรกเสมอ (สำคัญ: state ถูกลบเมื่อเงียบเกิน CLEAR_SEC เครื่องที่บินกลับเข้ามาใหม่จะ
     logged_cs=None แล้วยิง INSERT ซ้ำ — ให้ UNIQUE กันไว้ ไม่ใช่หวังพึ่ง state ในหน่วยความจำ).
-    lat/lon/alt/gs = ค่า ณ ตอนบันทึก ซึ่งอาจยังไม่มา (คนละ message type) → fill_sighting_pos เติมให้"""
-    ts = int(p.get("seen_ts") or p.get("ts") or time.time())
+    lat/lon/alt/gs = ค่า ณ ตอนบันทึก ซึ่งอาจยังไม่มา (คนละ message type) → fill_sighting_pos เติมให้.
+    ts ส่งเข้ามาเพราะความหมายต่างกันตามกรณี: ชื่อแรกของ contact = เวลาที่ได้ยินลำนี้ครั้งแรก
+    (คือค่าที่บอก coverage), ชื่อที่เปลี่ยนทีหลัง = เวลาที่เพิ่งเห็นชื่อนั้น — ไม่งั้นเวลากับพิกัดในแถว
+    เดียวกันจะมาจากคนละจังหวะ (ของเดิมเป็นแบบนั้น: สองแถวเวลาเท่ากันเป๊ะแต่คนละตำแหน่ง)"""
     g = time.gmtime(ts)
     has_pos = p.get("lat") is not None and p.get("lon") is not None
     try:
@@ -304,6 +324,7 @@ def record_sighting(hexid, p, cs):
                     p.get("gs") if has_pos else None,
                     1 if has_pos else 0))
         db.commit()
+        p["logged_ts"] = ts        # key ของแถวนี้ (fill_sighting_pos/close ใช้หาวันให้ตรงแถว)
     except sqlite3.Error as e:
         print("sighting write skipped:", e)   # DB ล็อก/เต็ม ไม่ควรทำให้ลูปอ่าน stream ตาย
 
