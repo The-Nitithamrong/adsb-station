@@ -260,8 +260,14 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `/usr/local/bin` + unit files and restarts changed services. On any `systemd/` change it also
   AUTO-ENABLES repo timers that are `disabled` (new timers deploy hands-free, no SSH) and restarts
   `enabled` ones; also AUTO-ENABLES new daemon services (`Type=simple`, no paired `.timer`, has
-  `[Install]` — e.g. `adsb-uptime`) every cycle if `disabled`; `masked` units are skipped (use
-  `systemctl mask` to keep one off). Runs from
+  `[Install]` — e.g. `adsb-uptime`) every cycle if `disabled`; `masked` units are skipped in the
+  enable loop, but `systemctl mask` CANNOT actually be applied to these units: mask works by symlinking
+  `/etc/systemd/system/<unit>` to /dev/null and autoupdate has already put a REAL file there, so it
+  fails with "File ... already exists". To pause a unit, use a drop-in condition instead — `.d/` dirs
+  are never touched by the sync, a failing condition makes `systemctl restart` skip the unit and exit
+  0 (so autoupdate cannot revive it), and it survives reboot:
+  `printf '[Unit]\nConditionPathExists=!/etc/adsb-paused-<unit>\n' > /etc/systemd/system/<unit>.d/pause.conf`
+  then `touch /etc/adsb-paused-<unit>` + `daemon-reload` + `stop`. Resume = remove the flag file. Runs from
   `/usr/local/bin` (self-updates). Install once (see README); merged changes deploy without a manual pull.
 - `deploy/uptime_server.py` (+ `systemd/adsb-uptime.service`) — OPTIONAL: tiny stdlib HTTP endpoint
   (`:8099`, `Type=simple` `Restart=always`) that serves the Pi's `/proc/uptime` seconds as plain text so
@@ -271,7 +277,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   the watchdog's liveness check (that stays TCP:22; an
   app-level server can crash while the Pi is fine → false reset). It's a `.service` not a `.timer`, so
   autoupdate auto-enables it (daemon service = `Type=simple`, no paired `.timer`, has `[Install]`) within
-  ~1 extra cycle — no SSH needed. `systemctl mask adsb-uptime` to keep it off.
+  ~1 extra cycle — no SSH needed. to keep it off use the drop-in pause above (`systemctl mask` does not work here).
 - `watchdog-esp32-display/` — ESP32 CYD2USB (ST7789 240×320 + touch) watchdog with a screen: NORMAL mode
   pings Pi TCP:22 every 30s → silent >15 min → power-cycle; BACKUP mode = on-screen RESET button (2-tap).
   Cuts power via ONE HA webhook (HA automation does turn_off→delay→turn_on; HA must be a SEPARATE box from
