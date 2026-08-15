@@ -3,7 +3,7 @@
 # แล้ว sync ไฟล์ที่ git pull ไม่อัปเดตให้ (watchdog → /usr/local/bin, unit → /etc/systemd/system)
 # + restart เฉพาะ service ที่ไฟล์เปลี่ยนจริง.
 # + auto-enable timer ใหม่ (disabled → enable) และ daemon service ใหม่ (Type=simple ไม่มี timer คู่)
-#   → deploy hands-free ไม่ต้อง SSH ไป enable เอง. ปิดถาวรใช้ `systemctl mask <unit>`.
+#   → deploy hands-free ไม่ต้อง SSH ไป enable เอง. วิธีปิด unit ดูท้ายหัวข้อนี้ (ห้ามใช้ mask).
 #
 # ปลอดภัย: ใช้ `merge --ff-only` — ถ้า repo มี local changes/diverged จะข้าม (ไม่ทับของในเครื่อง)
 # แล้ว log เตือนไว้ใน journal (journalctl -u adsb-autoupdate).
@@ -20,7 +20,12 @@ gitc fetch --quiet origin main || { log "fetch failed (network?) — ข้า�
 # ---- reconcile daemon services ทุกรอบ (ก่อนเช็คว่ามี commit ใหม่) ----
 # service ที่เป็น daemon จริง (Type=simple, ไม่มี .timer คู่, มี [Install]) → ถ้ายัง disabled ให้ enable --now.
 # ทำทุกรอบ (ไม่ผูกกับ systemd/ diff) เพราะสคริปต์นี้ self-update "รอบหน้า" — รอบที่ logic นี้เริ่มมีผล
-# อาจไม่มี diff แล้ว. idempotent (enabled อยู่แล้ว = ข้าม). อยากปิดตัวไหนถาวรใช้ `systemctl mask <s>`.
+# อาจไม่มี diff แล้ว. idempotent (enabled อยู่แล้ว = ข้าม).
+# เพื่อปิด unit ไม่ให้ autoupdate ปลุก ใช้ drop-in ไม่ใช่ `systemctl mask`:
+#   sudo mkdir -p /etc/systemd/system/<unit>.d
+#   printf '[Unit]\nConditionPathExists=!/etc/adsb-paused-<unit>\n' | sudo tee /etc/systemd/system/<unit>.d/pause.conf
+#   sudo touch /etc/adsb-paused-<unit>; sudo systemctl daemon-reload; sudo systemctl stop <unit>
+# (`mask` ล้มเหลวเพราะมันต้องสร้าง symlink ที่ /etc/systemd/system/<unit> ซึ่งสคริปต์นี้วางไฟล์จริงไว้แล้ว)
 for f in "$REPO"/systemd/*.service; do
     s="$(basename "$f")"; b="${s%.service}"
     [ -f "$REPO/systemd/$b.timer" ] && continue          # มี timer คู่ = oneshot ที่ timer สั่ง → ไม่ enable ตรง
@@ -59,7 +64,7 @@ fi
 if grep -q '^systemd/' <<<"$CHANGED"; then
     cp "$REPO"/systemd/*.service "$REPO"/systemd/*.timer /etc/systemd/system/ && systemctl daemon-reload && log "synced unit files + daemon-reload"
     # ทุก timer ใน repo: enabled → restart รับ unit ใหม่ · disabled (รวม timer ใหม่) → enable --now ให้เอง
-    # (hands-free deploy — ไม่ต้อง SSH ไปเปิด timer ใหม่). อยากปิดตัวไหนถาวรใช้ `systemctl mask <t>` → ข้าม.
+    # (hands-free deploy — ไม่ต้อง SSH ไปเปิด timer ใหม่). วิธีปิด: drop-in ConditionPathExists (ดูหัวไฟล์).
     for f in "$REPO"/systemd/*.timer; do
         t="$(basename "$f")"
         case "$(systemctl is-enabled "$t" 2>/dev/null || true)" in
