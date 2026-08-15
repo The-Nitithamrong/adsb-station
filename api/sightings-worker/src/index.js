@@ -38,7 +38,20 @@ function json(body, status = 200) {
   });
 }
 
-/** "+07:00" | "+0700" | "7" | "-05:30" | "Z" → วินาที (null = รูปแบบผิด) */
+/** วินาที → รูปแบบมาตรฐาน "+07:00" / "-05:30" / "Z"
+ *  ต้องสร้างจาก offset ที่ตีความได้แล้ว ไม่ใช่สะท้อนสตริงดิบกลับไป: `?tz=+07:00` ที่ไม่ได้ encode
+ *  จะถูกถอด `+` เป็นช่องว่างตามมาตรฐาน URL → ค่าที่ผู้เรียกส่งมาถึงเราเป็น " 07:00" (คำนวณถูก
+ *  แต่ echo ออกไปหน้าตาเพี้ยน) */
+function formatTz(offs) {
+  if (offs === 0) return "Z";
+  const sign = offs < 0 ? "-" : "+";
+  const a = Math.abs(offs);
+  const hh = String(Math.floor(a / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((a % 3600) / 60)).padStart(2, "0");
+  return `${sign}${hh}:${mm}`;
+}
+
+/** "+07:00" | "+0700" | "7" | "-05:30" | "Z" | " 07:00" (จาก + ที่ถูกถอด) → วินาที (null = ผิดรูป) */
 function tzSeconds(tz) {
   const t = (tz ?? DEFAULT_TZ).trim().toUpperCase();
   if (t === "Z" || t === "UTC") return 0;
@@ -132,7 +145,8 @@ function buildQuery(q) {
 /** ส่วนหัวที่ทุก endpoint ตอบเหมือนกัน — ผู้เรียกตรวจได้ว่าตัวเองได้ช่วงไหนมา */
 function envelope(f, q, extra) {
   return {
-    tz: (q.get("tz") ?? DEFAULT_TZ),
+    tz: formatTz(f.offs),          // รูปแบบมาตรฐานเสมอ ไม่ใช่สตริงดิบที่ผู้เรียกส่งมา
+    tz_offset_min: f.offs / 60,    // ตัวเลขล้วน ไว้ให้โค้ดฝั่งผู้เรียกใช้ต่อโดยไม่ต้อง parse
     date: q.get("date") ?? null,
     window_utc: f.window,
     ...extra,
