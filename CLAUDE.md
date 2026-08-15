@@ -44,9 +44,20 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   rests on the UNIQUE index, not on memory: state is dropped after `CLEAR_SEC`, so an aircraft that
   leaves and returns re-fires the INSERT — `INSERT OR IGNORE` keeps the earliest row.
   `p["logged_cs"]` holds the callsign already written, NOT a bool: a weak signal decodes partial
-  callsigns (observed a bare `"N"`), and the old bool latched that wrong name in forever. Now a
-  callsign shorter than `MIN_CALLSIGN_LEN` is ignored, and a LATER different callsign writes its own
-  row (`flight` is part of the key) — a duplicate beats a permanently wrong name.
+  callsigns (observed a bare `"N"`), and the old bool latched that wrong name in forever. A callsign
+  shorter than `MIN_CALLSIGN_LEN` is ignored outright.
+  A callsign CHANGE is then treated by WHERE it happens, and the distinction came from station data:
+  - across contacts (state was dropped after `CLEAR_SEC`, so `logged_cs` is None) = the airframe landed
+    and flew out again — a real Bangkok transit. Written immediately; that second row is the point.
+  - inside ONE contact = physically impossible (aircraft don't rename mid-air). Observed as pairs of
+    hex differing by one bit (781BB5/781FB5, 8851E5/8851E7, often `reg` NULL) reporting each other's
+    callsign at the SAME second from contradictory positions — an ADS-B bit error leaking another
+    aircraft's message into this hex. Needs `MIN_CALLSIGN_HITS` repeats before it is believed, since a
+    corrupted callsign rarely repeats identically.
+  `record_sighting` takes the timestamp explicitly because it means different things per case: for the
+  first callsign it is `seen_ts` (first contact with the airframe = the coverage figure), for a later
+  one it is now. Passing `seen_ts` for both is what made the old bad rows carry one timestamp with two
+  different positions.
   Two fields arrive late and are filled by a single UPDATE each, tracked by `pos_state`
   (0 pending → 1 filled → 2 aircraft left without ever sending position):
   position (`fill_sighting_pos`, since callsign usually precedes position) and `reg`
@@ -106,10 +117,19 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   shadows the module-level `cfg()` env helper and makes it local to the whole function
   (`UnboundLocalError` on the first call). It is `tcfg`.
   D1 creds (`D1_ACCOUNT_ID/D1_DATABASE_ID/D1_API_TOKEN`, `STATION_ID`) live in /etc/fr24-watchdog.env.
-- `api/sightings-worker/` — READ-ONLY Cloudflare Worker serving the `sightings` catalog over HTTP:
-  `GET /sightings?date=&from=&to=&flight=&reg=&hex=&station=&limit=&offset=&order=` → `{count, limit,
-  offset, has_more, results:[{flight_number, registration, first_seen_utc, first_seen_ts, day, hex,
-  station, lat, lon, altitude_ft, ground_speed_kt}]}`, plus `/health`. Deployed at
+- `api/sightings-worker/` — READ-ONLY Cloudflare Worker serving the `sightings` catalog over HTTP.
+  `/flights` (1 row per flight — the "what flew that day" question), `/aircraft` (1 row per airframe +
+  its callsigns; `?transit=1` = flew more than one flight), `/days` (per-day counts for a date picker),
+  `/sightings` (raw rows with position), `/health`.
+  DAY HANDLING IS THE CORE OF THIS API: the `day` column is a UTC day, so matching it directly answers
+  the wrong question for a Thai user — "the 15th" would return 07:00 on the 15th → 07:00 on the 16th
+  BKK, losing 00:00–07:00. Every endpoint converts `date`+`tz` (default `+07:00`) into an epoch window
+  and filters on the indexed `first_seen_ts`, and ALWAYS echoes `window_utc` so the caller can see
+  which window they actually got. `airline=THA` is a callsign prefix filter.
+  `/aircraft.span_min` is what separates a real transit from noise: a genuine turnaround spans tens of
+  minutes, while span ≈ 0 means one airframe reported two callsigns in the same second — impossible,
+  so it is an ADS-B bit error leaking another aircraft's message into this hex (seen as hex pairs
+  differing by one bit, e.g. 781BB5/781FB5, often with `reg` NULL). Deployed at
   `adsb-sightings-api.happytohelp.workers.dev`; `API_KEY` secret is SET so a bearer is required. All caller values are bound params (no SQL string building); CORS `*`;
   optional bearer via a `API_KEY` secret (unset = public read). `has_more` = "got exactly `limit` rows"
   rather than a second `COUNT(*)` (D1 bills rows read). Writes stay with outbox's D1 REST token, which
