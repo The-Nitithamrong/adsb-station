@@ -42,6 +42,7 @@ INBOUND_WRITE_SEC = 10                    # throttle การเขียน in
 LIST_MAX = 5                              # กี่เครื่องใน list บน Pixoo (แถวที่พอดีจอ)
 TRACK_NEAR_NM = 60                        # บันทึก track เฉพาะเที่ยวที่เข้าใกล้ VTBS <= นี้ (approach/arrival; กัน overflight ไกล)
 TRACK_MIN_SAMPLES = 5                     # ต้องมี position fix อย่างน้อยเท่านี้ถึงบันทึก (กัน noise)
+MIN_CALLSIGN_LEN = 3                      # สั้นกว่านี้ = decode ไม่ครบ (เคยได้ "N" ตัวเดียว) ไม่ลง sightings
 FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15, "vrate": 16}
 
 # ---------- Telegram (reuse env เดิม) ----------
@@ -90,15 +91,25 @@ db.execute("""CREATE TABLE IF NOT EXISTS tracks(
 # ไม่ว่าจะบินผ่านเฉย ๆ หรือไกลแค่ไหน — ป้อน API ภายนอก (D1) ที่ถามว่าวันนี้เห็นเที่ยวบินอะไรบ้าง.
 # reg เว้นว่างไว้ก่อนเสมอ: ADS-B ไม่ได้ส่งทะเบียนมา (มีแค่ hex 24-bit) → reg_lookup.py เติมทีหลัง
 # (ห้าม lookup ตรงนี้ — parse() อยู่ใน hot loop ของ socket, บล็อกรอ HTTP = อ่าน stream ไม่ทัน ข้อมูลหาย)
+# lat/lon/alt_ft/gs_kt = สภาพ "ตอนเห็นครั้งแรก" (ไม่ใช่ค่าล่าสุด) — บอกว่ารับสัญญาณลำนี้ได้ที่ไหน/สูงเท่าไร
+# pos_state: 0 ยังไม่มีตำแหน่ง · 1 เติมแล้ว · 2 เครื่องหายไปแล้วแต่ไม่เคยส่งตำแหน่ง (เลิกรอ)
 db.execute("""CREATE TABLE IF NOT EXISTS sightings(
     day TEXT, flight TEXT, hex TEXT,
     first_seen_ts INTEGER, first_seen_utc TEXT,
     reg TEXT, reg_state INTEGER DEFAULT 0,
+    lat REAL, lon REAL, alt_ft INTEGER, gs_kt INTEGER, pos_state INTEGER DEFAULT 0,
     UNIQUE(day, flight, hex))""")
 # migrate DB เก่าที่ยังไม่มีคอลัมน์ star_* (idempotent)
 for _col, _typ in (("star_fix", "TEXT"), ("star_alt", "INTEGER"), ("star_ts", "INTEGER")):
     try:
         db.execute(f"ALTER TABLE tracks ADD COLUMN {_col} {_typ}")
+    except sqlite3.OperationalError:
+        pass
+# เช่นกันกับ sightings ที่สร้างไว้ก่อนมี lat/lon/alt/gs (idempotent)
+for _col, _typ in (("lat", "REAL"), ("lon", "REAL"), ("alt_ft", "INTEGER"),
+                   ("gs_kt", "INTEGER"), ("pos_state", "INTEGER DEFAULT 0")):
+    try:
+        db.execute(f"ALTER TABLE sightings ADD COLUMN {_col} {_typ}")
     except sqlite3.OperationalError:
         pass
 db.commit()
@@ -151,7 +162,7 @@ def parse(line):
                                    "alt_at_min": None, "min_alt": None, "max_dist": None,
                                    "alert_ts": None, "alert_eta": None, "last_hist_ts": 0,
                                    "star_fix": None, "star_alt": None, "star_ts": None,
-                                   "seen_ts": None, "logged": False})
+                                   "seen_ts": None, "logged_cs": None, "pos_state": 0})
     for k, i in FIELDS.items():
         v = f[i].strip()
         if not v:
@@ -169,9 +180,15 @@ def parse(line):
         p["seen_ts"] = p["ts"]        # ข้อความแรกของลำนี้ = "เห็นครั้งแรก" (ก่อน callsign จะมาด้วยซ้ำ)
     # callsign มาใน MSG type 1 ซึ่งมักช้ากว่าข้อความแรกไม่กี่วินาที — พอรู้ชื่อเที่ยวบินแล้วค่อยลงแคตตาล็อก
     # (first_seen ยังใช้เวลาที่เห็นลำนี้ครั้งแรกจริง ๆ ไม่ใช่เวลาที่ callsign โผล่)
-    if not p["logged"] and p["callsign"].strip():
-        record_sighting(hexid, p)
-        p["logged"] = True
+    cs = p["callsign"].strip()
+    # กัน callsign ที่ decode ไม่ครบ: สัญญาณอ่อนเคยให้ "N" ตัวเดียวมาแล้ว (ลำนั้นเลยจมอยู่ใน catalog
+    # ด้วยชื่อผิดถาวร เพราะเดิมบันทึกครั้งเดียวแล้วปิดสวิตช์). ของจริงสั้นสุดคือ 3 ตัว
+    if len(cs) >= MIN_CALLSIGN_LEN and cs != p["logged_cs"]:
+        # เปลี่ยนจากที่เคยบันทึก = decode ครบขึ้น (หรือเปลี่ยน callsign จริง) → ลงแถวใหม่ตามชื่อใหม่
+        # แถวเก่าที่ผิดคงอยู่ (UNIQUE key มี flight อยู่ด้วย) — ยอมให้ซ้ำ ดีกว่าปล่อยให้ชื่อผิดค้างอย่างเดียว
+        record_sighting(hexid, p, cs)
+        p["logged_cs"] = cs
+        p["pos_state"] = 1 if (p.get("lat") is not None and p.get("lon") is not None) else 0
 
     # อัปเดตระยะเมื่อมี position ใหม่
     if p["lat"] is not None and p["lon"] is not None:
@@ -185,6 +202,8 @@ def parse(line):
             if p["alt"] is not None:
                 p["alt_hist"] = (p["alt_hist"] + [p["alt"]])[-6:]
             p["last_hist_ts"] = p["ts"]
+        if p["logged_cs"] and p["pos_state"] == 0:   # แถวลงไปตอนยังไม่มีพิกัด → เติมทีเดียวตรงนี้
+            fill_sighting_pos(hexid, p)
         accumulate(p)
         detect_star(p)
         check(hexid, p)
@@ -243,23 +262,57 @@ def check(hexid, p):
                     round(p["dist"], 1), p["gs"], p["alt"]))
         db.commit()
 
-def record_sighting(hexid, p):
-    """ลงแคตตาล็อก 1 แถวต่อ (วัน UTC, เที่ยวบิน, ลำ) — เห็นครั้งแรกเมื่อไร.
+def sighting_day(p):
+    return time.strftime("%Y-%m-%d", time.gmtime(int(p.get("seen_ts") or p.get("ts") or time.time())))
+
+def record_sighting(hexid, p, cs):
+    """ลงแคตตาล็อก 1 แถวต่อ (วัน UTC, เที่ยวบิน, ลำ) — เห็นครั้งแรกเมื่อไร + อยู่ที่ไหนตอนนั้น.
     UTC ไม่ใช่เวลาไทย: ผู้บริโภคเป็น API ภายนอก + ตรงกับ ts อื่น ๆ ในระบบ (day ก็ตัดตามวัน UTC).
     INSERT OR IGNORE + UNIQUE(day,flight,hex) → เจอลำเดิมซ้ำทั้งวันก็ยังแถวเดียว และเวลาที่เก็บไว้
     เป็นครั้งแรกเสมอ (สำคัญ: state ถูกลบเมื่อเงียบเกิน CLEAR_SEC เครื่องที่บินกลับเข้ามาใหม่จะ
-    logged=False แล้วยิง INSERT ซ้ำ — ให้ UNIQUE กันไว้ ไม่ใช่หวังพึ่ง state ในหน่วยความจำ)."""
-    cs = p["callsign"].strip()
+    logged_cs=None แล้วยิง INSERT ซ้ำ — ให้ UNIQUE กันไว้ ไม่ใช่หวังพึ่ง state ในหน่วยความจำ).
+    lat/lon/alt/gs = ค่า ณ ตอนบันทึก ซึ่งอาจยังไม่มา (คนละ message type) → fill_sighting_pos เติมให้"""
     ts = int(p.get("seen_ts") or p.get("ts") or time.time())
     g = time.gmtime(ts)
+    has_pos = p.get("lat") is not None and p.get("lon") is not None
     try:
-        db.execute("INSERT OR IGNORE INTO sightings(day,flight,hex,first_seen_ts,first_seen_utc) "
-                   "VALUES (?,?,?,?,?)",
+        db.execute("INSERT OR IGNORE INTO sightings(day,flight,hex,first_seen_ts,first_seen_utc,"
+                   "lat,lon,alt_ft,gs_kt,pos_state) VALUES (?,?,?,?,?,?,?,?,?,?)",
                    (time.strftime("%Y-%m-%d", g), cs, hexid, ts,
-                    time.strftime("%Y-%m-%dT%H:%M:%SZ", g)))
+                    time.strftime("%Y-%m-%dT%H:%M:%SZ", g),
+                    round(p["lat"], 4) if has_pos else None,
+                    round(p["lon"], 4) if has_pos else None,
+                    p.get("alt") if has_pos else None,
+                    p.get("gs") if has_pos else None,
+                    1 if has_pos else 0))
         db.commit()
     except sqlite3.Error as e:
         print("sighting write skipped:", e)   # DB ล็อก/เต็ม ไม่ควรทำให้ลูปอ่าน stream ตาย
+
+def fill_sighting_pos(hexid, p):
+    """เติม lat/lon/alt/gs ให้แถวที่บันทึกไปตอนยังไม่มีตำแหน่ง — ยิงครั้งเดียวตอน position แรกมาถึง.
+    ทำไมต้องมี: callsign (MSG type 1) มักมาก่อน position (type 3) → ถ้าไม่เติม แถวจะไม่มีพิกัดตลอดไป.
+    outbox ถือ pos_state != 0 เป็นเงื่อนไข "พร้อมส่ง" ด้วย → D1 (INSERT OR IGNORE แก้ทีหลังไม่ได้)
+    จะไม่ได้แถวที่ยังเติมไม่เสร็จไป."""
+    try:
+        db.execute("UPDATE sightings SET lat=?, lon=?, alt_ft=?, gs_kt=?, pos_state=1 "
+                   "WHERE day=? AND flight=? AND hex=? AND pos_state=0",
+                   (round(p["lat"], 4), round(p["lon"], 4), p.get("alt"), p.get("gs"),
+                    sighting_day(p), p["logged_cs"], hexid))
+        db.commit()
+        p["pos_state"] = 1
+    except sqlite3.Error as e:
+        print("sighting pos update skipped:", e)
+
+def close_sighting_pos(hexid, p):
+    """เครื่องหายไปแล้วแต่ไม่เคยส่งตำแหน่งเลย → pos_state=2 (เลิกรอ) ให้ outbox ส่งขึ้นไปได้
+    ไม่งั้นแถวจะค้างในคิวตลอดกาล"""
+    try:
+        db.execute("UPDATE sightings SET pos_state=2 WHERE day=? AND flight=? AND hex=? AND pos_state=0",
+                   (sighting_day(p), p["logged_cs"], hexid))
+        db.commit()
+    except sqlite3.Error as e:
+        print("sighting close skipped:", e)
 
 def record_track(hexid, p):
     """บันทึก 1 แถวลง tracks ตอนเครื่องหายไป — เฉพาะเที่ยวที่เข้าใกล้สนามพอควร"""
@@ -287,6 +340,8 @@ def prune():
     now = time.time()
     for h in [h for h, p in flights.items() if now - p.get("ts", 0) > CLEAR_SEC]:
         record_track(h, flights[h])
+        if flights[h]["logged_cs"] and flights[h]["pos_state"] == 0:
+            close_sighting_pos(h, flights[h])   # ไม่เคยส่งพิกัดจนหายไป → เลิกรอ ปล่อยให้ outbox ส่ง
         del flights[h]
 
 def current_inbound():

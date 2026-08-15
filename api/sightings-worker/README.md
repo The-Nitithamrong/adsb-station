@@ -47,10 +47,15 @@ curl "https://adsb-sightings-api.<subdomain>.workers.dev/sightings?date=2026-08-
       "first_seen_ts": 1786000062,
       "day": "2026-08-10",
       "hex": "8801f2",
-      "station": "Arin" }
+      "station": "Arin",
+      "lat": 12.8116, "lon": 101.7511,
+      "altitude_ft": 30350, "ground_speed_kt": 428 }
   ]
 }
 ```
+
+`lat`/`lon`/`altitude_ft`/`ground_speed_kt` = สภาพ **ตอนเห็นครั้งแรก** ไม่ใช่ค่าล่าสุด — บอกว่าสถานีเริ่ม
+รับลำนี้ได้ที่ตรงไหน สูงเท่าไร (ใช้ดู coverage ได้) `null` = ลำนั้นไม่เคยส่งค่านั้นมาเลยตอนอยู่ในระยะ
 
 `has_more` มาจาก "ได้แถวเต็ม limit พอดี" ไม่ได้ยิง `COUNT(*)` ซ้ำ (D1 คิดเงินตามแถวที่อ่าน)
 — หน้าถัดไปใช้ `offset` เพิ่มไปทีละ `limit`
