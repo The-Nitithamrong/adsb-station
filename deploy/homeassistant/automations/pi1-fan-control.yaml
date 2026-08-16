@@ -10,11 +10,28 @@
 #       ห้ามเดา — copy จาก Developer Tools → States (ใส่ผิดตัว = เงื่อนไขเป็น False เงียบ ๆ ไม่ฟ้อง error)
 #   - switch.pi_fan_socket_1 : ปลั๊ก Tuya ของ "พัดลม"
 #       ⚠️ ห้ามสลับกับ switch.pi_socket_1 ซึ่งเป็นปลั๊กไฟของ Pi#1 เอง — ใส่ผิดตัวแปลว่าพอ CPU
-#          เย็นลงต่ำกว่า 52°C ระบบจะสั่งตัดไฟ Pi ตัวเอง
-# ปรับ threshold ได้: เปิดที่ above, ปิดที่ below (ต่างกัน = hysteresis กันเปิด-ปิดถี่)
-#
+#          เย็นลงต่ำกว่า 50°C ระบบจะสั่งตัดไฟ Pi ตัวเอง
 # กันค้าง (สำคัญ): numeric_state จุดชนวนเฉพาะตอน "ข้าม" เกณฑ์ — ถ้าพลาด edge (HA รีสตาร์ท/sensor หาย)
 # พัดลมค้าง → ใส่ time_pattern re-check ทุก 3 นาที + choose ตั้งสถานะให้ถูกตาม temp ปัจจุบันเสมอ (self-heal)
+#
+# ── threshold 55/50 มาจากไหน (วัดจริง ห้ามเดา) ─────────────────────────────────
+# จากตาราง `heartbeat` ใน D1 (138 snapshot / 23 ชม. โดย load1 นิ่งที่ ~0.4 ตลอด → อุณหภูมิเปลี่ยน
+# เพราะพัดลมล้วน ๆ ไม่ใช่โหลด) สถานีนี้มีอยู่แค่ 2 สภาวะ:
+#     พัดลม ON  : 46.3 – 49.6 °C  (กลาง 47.4)
+#     พัดลม OFF : 55.1 – 61.1 °C  (กลาง 57.9)
+#   → พัดลมมีค่า ~10.5 °C และตอบสนองใน <10 นาที (48.0 °C ตอนปิดพัดลม → 57.9 °C อีก 10 นาทีถัดมา)
+#
+# ข้อจำกัด: เกณฑ์ทั้งสองตัวต้องอยู่ "ใน" ช่องว่างระหว่างสองสภาวะ คือ 49.6 – 55.6 °C
+#   - above >= 56 → สูงกว่าเพดานธรรมชาติ พัดลมแทบไม่มีวันติด (numeric_state ต้องการการ "ข้าม" เกณฑ์
+#     แต่ Pi แตะ 60 แค่วูบเดียว) — นี่คือสาเหตุจริงที่ค่าเดิม above:60 ดูเหมือนพัง ทั้งที่ไม่ใช่บั๊ก
+#   - below <= 49 → ต่ำกว่าพื้นตอนพัดลมทำงาน พัดลมไม่มีวันดับ = กลับไปเป็นบั๊ก "ค้าง on 24 ชม."
+# 55/50 คือช่วงที่กว้างที่สุดที่ยัดลงช่องนี้ได้ → Pi อยู่ที่ ~50–55 °C, สลับทุก ~15–25 นาที
+#
+# ตัวเลข "ร้อนเกินไป" ของ Pi 5 คือ 80 °C (เริ่ม throttle) / 85 °C (hard throttle) — ต่ำกว่านั้น
+# ไม่มีผลต่ออายุการใช้งาน สถานีนี้สูงสุดตลอดกาล 61.1 °C และ `throttled`=0x0 ทุกแถว (เหลือ headroom
+# ~19 °C) → พัดลมตัวนี้ซื้อ margin ไม่ได้กันพัง. ถ้าอยากได้ ~47 °C คงที่ ไม่มีเกณฑ์ไหนทำได้
+# (ต้องเปิดตลอด) — กรณีนั้นเปิดค้างไปเลยง่ายกว่า: 7 W ≈ 25 บาท/เดือน และไม่มีการสึกของรีเลย์
+# ── ปรับเกณฑ์เมื่อไร: ถ้าย้ายที่ตั้ง/เปลี่ยนเคส/เพิ่มโหลด ให้วัดสองสภาวะใหม่จาก heartbeat ก่อน ──
 
 alias: "ADS-B: Pi#1 cooling fan by CPU temp"
 description: "เปิด/ปิดพัดลม Tuya ตาม CPU temp ของ Pi#1 (hysteresis + time_pattern กันค้าง)"
@@ -22,30 +39,30 @@ mode: single
 trigger:
   - platform: numeric_state
     entity_id: sensor.ads_b_arin_cpu_temperature
-    above: 60
+    above: 55
   - platform: numeric_state
     entity_id: sensor.ads_b_arin_cpu_temperature
-    below: 52
+    below: 50
   - platform: time_pattern
     minutes: "/3"
 action:
   - choose:
-      # ร้อน (>60°C) → เปิดพัดลม
+      # ร้อน (>55°C) → เปิดพัดลม
       - conditions:
           - condition: numeric_state
             entity_id: sensor.ads_b_arin_cpu_temperature
-            above: 60
+            above: 55
         sequence:
           - service: switch.turn_on
             target:
               entity_id: switch.pi_fan_socket_1
-      # เย็น (<52°C) → ปิดพัดลม
+      # เย็น (<50°C) → ปิดพัดลม
       - conditions:
           - condition: numeric_state
             entity_id: sensor.ads_b_arin_cpu_temperature
-            below: 52
+            below: 50
         sequence:
           - service: switch.turn_off
             target:
               entity_id: switch.pi_fan_socket_1
-    # temp 52-60 (โซน hysteresis) → ไม่แตะ คงสถานะเดิม
+    # temp 50-55 (โซน hysteresis) → ไม่แตะ คงสถานะเดิม

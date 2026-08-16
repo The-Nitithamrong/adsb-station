@@ -255,6 +255,17 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   numeric_state conditions silently stay False (fan never toggles). Always copy the real entity_id from
   HA → Developer Tools → States; never guess. A robust fan automation also needs a `time_pattern`
   re-check (numeric_state only fires on threshold *crossings* — a missed edge leaves the fan stuck).
+  FAN THRESHOLDS ARE BOUNDED BY MEASURED PHYSICS, not by taste (measured off the D1 `heartbeat` table,
+  138 snapshots / 23 h at a flat `load1`≈0.4 — so temp tracked the fan, not load): fan ON = 46.3–49.6 °C,
+  fan OFF = 55.1–61.1 °C, i.e. the fan is worth ~10.5 °C and settles in <10 min. BOTH thresholds must sit
+  inside the 49.6–55.6 °C gap between those two states, else the automation degenerates silently:
+  `above` ≥ 56 is over the natural ceiling so the fan can essentially never start (the real reason
+  `above: 60` looked broken — the Pi only touched 60.6/61.1 for one sample and `numeric_state` needs a
+  crossing), and `below` ≤ 49 is under the fan-on floor so it can never stop (= the "stuck on 24 h" bug
+  again). Hence 55/50. "Too hot" for a Pi 5 is 80 °C (throttle) / 85 °C (hard) — this station's all-time
+  max is 61.1 °C with `throttled`=0x0 on every row, so the fan buys margin, it does not prevent damage;
+  ~47 °C flat is unreachable by ANY threshold pair (needs the fan on permanently — 7 W ≈ 25 THB/month).
+  Re-measure both states from `heartbeat` before re-tuning if the case/location/load changes.
 - `deploy/adsb-autoupdate.sh` (+ `systemd/adsb-autoupdate.{service,timer}`) — OPTIONAL: Pi auto-pulls
   `origin/main` every ~10 min (`merge --ff-only`, skips on local conflicts), then syncs
   `/usr/local/bin` + unit files and restarts changed services. On any `systemd/` change it also
