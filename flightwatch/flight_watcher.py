@@ -46,6 +46,33 @@ TRACK_MIN_SAMPLES = 5                     # ต้องมี position fix อ�
 MIN_CALLSIGN_LEN = 3                      # สั้นกว่านี้ = decode ไม่ครบ (เคยได้ "N" ตัวเดียว) ไม่ลง sightings
 MIN_CALLSIGN_HITS = 2                     # callsign ที่เปลี่ยนกลาง contact ต้องได้ยินซ้ำกี่ครั้งถึงเชื่อ
 FIELDS = {"callsign": 10, "alt": 11, "gs": 12, "trk": 13, "lat": 14, "lon": 15, "vrate": 16}
+# ขอบเขตความสมเหตุสมผลของแต่ละฟิลด์ — ADS-B ไม่มี checksum ระดับที่กันได้หมด bit error เลยหลุดมาเป็น
+# ตัวเลขสุดขั้ว. วัดจาก D1 จริง: `tracks.last_alt` มี 89,400 ft (206 แถว/0.6% เกิน 60,000 ft) และ
+# `max_dist_nm` มี 9,646 nm (18 แถว/0.05% เกิน 300 nm) ซึ่งไกลเกือบครึ่งโลก. จำนวนน้อยจนไม่ขยับค่ากลาง
+# แต่ทำลาย max/p90 ของทุก query ที่ไม่ได้กรอง (เคยดัน p90 approach time จาก 26 เป็น 49 นาที)
+# → ทิ้งตั้งแต่ตอนอ่าน ไม่ใช่ตอน query: ค่าเพี้ยนที่เข้า state แล้วจะไหลต่อไป min_dist/max_dist/
+#   sightings/inbound.json/eta_push ทุกทาง แก้ทีหลังไม่ได้ (D1 sink เป็น INSERT OR IGNORE)
+SANE = {"alt": (-1500, 60000),      # ต่ำสุดเผื่อ QNH แปลก ๆ ตอนอยู่บนพื้น / สูงสุดเหนือเพดาน bizjet (~51,000)
+        "gs": (0, 1000), "trk": (0, 360), "vrate": (-20000, 20000),
+        "lat": (-90.0, 90.0), "lon": (-180.0, 180.0)}
+MAX_PLAUSIBLE_NM = 300                     # ระยะไกลกว่านี้ = พิกัดเพี้ยน ไม่ใช่การรับได้ไกล (คนละตัวกับ
+#   MAX_RANGE_NM ซึ่งเป็นเกณฑ์ "จะแจ้งเตือน/เขียน inbound.json มั้ย" — อันนี้คือ "ข้อมูลนี้จริงมั้ย")
+#   radio horizon ≈ 1.06×(√h_rx + √h_ac) ft→nm: เสาสูง ~30 ft + เครื่องที่ FL430 ≈ 226 nm; สถิติจริงของ
+#   สถานีนี้ไกลสุด 253 nm (refraction ช่วยนิดหน่อย) → 300 nm สูงกว่าเพดานฟิสิกส์ ตัดของจริงไม่โดน
+#   ยืนยันจากการกระจายจริงใน D1 (93,041 tracks): 250-300 nm มี 10 แถว (สูงสุด 295.8) แล้ว "ว่างสนิท"
+#   จนถึง 317.7 → 300 ตกอยู่ในช่องว่างพอดี ไม่ใช่เลขกลม ๆ ที่ตั้งลอย ๆ
+
+# ---------- ตัวนับค่าที่ทิ้งเพราะไม่สมเหตุสมผล ----------
+REJECT_LOG_EVERY = 200                     # log ทุก N ครั้งต่อเหตุผล (hot loop — ห้ามพิมพ์ทุกครั้ง)
+_rejects = {}
+
+def _reject(kind, detail):
+    """นับ + log เป็นระยะ. ถ้าตัวเลขนี้พุ่งผิดปกติแปลว่าสัญญาณแย่ลงหรือเกณฑ์ SANE ตั้งแคบไป —
+    ไม่ใช่แค่ทิ้งเงียบ ๆ ไม่งั้นเกณฑ์ที่ผิดจะกินข้อมูลจริงไปโดยไม่มีใครรู้"""
+    n = _rejects[kind] = _rejects.get(kind, 0) + 1
+    if n % REJECT_LOG_EVERY == 1:
+        print(f"  [sane] ทิ้ง {kind} ครั้งที่ {n}: {detail}")
+
 
 # ---------- Telegram (reuse env เดิม) ----------
 def load_env(path):
@@ -184,18 +211,39 @@ def parse(line):
                                    "seen_ts": None, "logged_cs": None, "pos_state": 0,
                                    "cs_pending": None, "cs_hits": 0,
                                    "logged_ts": 0})
+    pos = {}                          # lat/lon พักไว้ก่อน — commit ทีเดียวหลังตรวจระยะ (ดู SANE)
     for k, i in FIELDS.items():
         v = f[i].strip()
         if not v:
             continue
         if k == "callsign":
             p["callsign"] = v
-        elif k in ("alt", "gs", "trk", "vrate"):
-            try: p[k] = int(v)
-            except ValueError: pass
+            continue
+        try:
+            v = int(v) if k in ("alt", "gs", "trk", "vrate") else float(v)
+        except ValueError:
+            continue
+        lo, hi = SANE[k]
+        if not lo <= v <= hi:
+            _reject("field", f"{k}={v}")  # bit error → ทิ้งเฉพาะฟิลด์นี้ ที่เหลือในข้อความยังใช้ได้
+            continue
+        if k in ("lat", "lon"):
+            pos[k] = v
         else:
-            try: p[k] = float(v)
-            except ValueError: pass
+            p[k] = v
+    # ตำแหน่ง: ยอมรับก็ต่อเมื่อระยะที่ได้อยู่ในวิสัยที่รับได้จริง ไม่งั้นทิ้งทั้ง fix แล้วคงพิกัดดีตัวเดิมไว้
+    # (ทิ้งทั้งคู่ เพราะ lat เพี้ยนตัวเดียวก็ทำให้พิกัดผิดทั้งจุด — เก็บครึ่งเดียวไม่มีความหมาย)
+    if pos:
+        lat = pos.get("lat", p["lat"])
+        lon = pos.get("lon", p["lon"])
+        if lat is None or lon is None:
+            p.update(pos)                        # ยังได้ไม่ครบคู่ เก็บไว้รออีกครึ่ง
+        else:
+            d = haversine_nm(lat, lon, DEST_LAT, DEST_LON)
+            if d <= MAX_PLAUSIBLE_NM:
+                p["lat"], p["lon"], p["dist"] = lat, lon, d
+            else:
+                _reject("pos", f"{lat:.4f},{lon:.4f} = {d:.0f}nm")
     p["ts"] = time.time()
     if p["seen_ts"] is None:
         p["seen_ts"] = p["ts"]        # ข้อความแรกของลำนี้ = "เห็นครั้งแรก" (ก่อน callsign จะมาด้วยซ้ำ)
@@ -222,9 +270,11 @@ def parse(line):
                 p["logged_cs"], p["pos_state"] = cs, _has_pos(p)
                 p["cs_pending"], p["cs_hits"] = None, 0
 
-    # อัปเดตระยะเมื่อมี position ใหม่
+    # อัปเดตสถิติทุกข้อความที่มีพิกัดอยู่ในมือแล้ว (p["dist"] ถูกคำนวณตอน commit พิกัดข้างบน — ที่นี่ไม่คิดซ้ำ
+    # เพราะพิกัดใน state ผ่านการตรวจแล้วเสมอ จึงได้ค่าเดิม). เงื่อนไขคงเดิมโดยตั้งใจ: accumulate() นับ
+    # `samples` จากทุกข้อความ ไม่ใช่เฉพาะข้อความที่มี position → เปลี่ยนตรงนี้จะทำให้ TRACK_MIN_SAMPLES
+    # และ samples ที่เก็บมาแล้วเทียบกับของเดิมไม่ได้
     if p["lat"] is not None and p["lon"] is not None:
-        p["dist"] = haversine_nm(p["lat"], p["lon"], DEST_LAT, DEST_LON)
         # เก็บ dist/alt history แบบเว้นเวลา >= HIST_MIN_SEC (ไม่ใช่ทุก fix): dump1090 ส่ง position หลาย
         # fix/วินาที — ถ้าเก็บทุก fix, 6 ตัวหลังกินเวลา <1 วิ → ระยะแทบไม่เปลี่ยน → closing (>1nm) ไม่เคยจริง
         # → is_inbound False ตลอด → พลาด inbound เกือบทั้งหมด (obs: THA ลง VTBS 8 เที่ยว แต่ events=0).
