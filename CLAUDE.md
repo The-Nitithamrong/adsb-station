@@ -64,6 +64,20 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (`reg_lookup.py` — ADS-B carries no registration, only hex; never look it up inline, `parse()` is the
   socket hot loop). outbox ships only rows where BOTH are settled, because its D1 sink is
   INSERT OR IGNORE and could never correct a row sent early.
+  SANITY BOUNDS (`SANE`, `MAX_PLAUSIBLE_NM`) are applied AT READ TIME in `parse()`, never at query
+  time. ADS-B has no error detection strong enough to stop every bit error, so corrupt values arrive as
+  extreme numbers — measured in D1: `last_alt` = 89,400 ft (560 rows > 60,000 ft) and `max_dist_nm` =
+  9,646 nm (42 rows > 300 nm, i.e. nearly half the planet). Too few to move a median, but they wreck
+  max/p90 on every unfiltered query (they once inflated a p90 approach time from 26 to 49 min). Filtering
+  at query time is not enough: a bad value admitted into state propagates to `min_dist`/`max_dist`/
+  `sightings`/`inbound.json`/`eta_push` and the D1 sink is INSERT OR IGNORE, so it can never be corrected.
+  A failed field is dropped ALONE, not the whole message (one message carries alt + position, and the
+  other half is usually fine); a failed position drops BOTH lat and lon and keeps the previous good fix.
+  `MAX_PLAUSIBLE_NM`=300 is distinct from `MAX_RANGE_NM`=250 ("should we alert?" vs "is this real?") and
+  is NOT a round guess: radio horizon ≈ 1.06×(√h_rx+√h_ac) ≈ 226 nm at FL430, the station's real best is
+  253 nm, and D1's distribution has 10 rows in 250–300 (max 295.8) then NOTHING until 317.7 — 300 lands
+  inside that empty band. `_reject()` counts and logs every 200th drop per reason: a spike means the
+  signal degraded or a bound is too tight, and a silent filter eating real data is the failure to avoid.
   GOTCHA (`is_inbound`): "closing" is judged from `dist_hist` spaced by TIME (`HIST_MIN_SEC`=15s), NOT
   by fix count — dump1090 sends many msg/s AND `lat/lon` persist in state so `dist_hist` was appended on
   EVERY message (~10/s), making the last-6 window span <1s → distance barely changes → `closing` (needs
