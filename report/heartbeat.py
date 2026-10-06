@@ -18,13 +18,17 @@ import json, os, socket, subprocess, time, urllib.request, urllib.error
 
 ENV_FILE = "/etc/fr24-watchdog.env"
 STATUS_F = "/run/fr24-watchdog/status.json"
+PIXOO_F = "/run/pixoo/status.json"   # pixoo/main.py ประทับเวลาทุกครั้งที่ push สำเร็จ
 LOCAL_LOG = "/home/arin/heartbeat.jsonl"     # backup ในเครื่อง (cloud = ตัวหลักที่รอด hang)
 STALE_SEC = 20 * 60                           # status.json เก่ากว่านี้ = watchdog ไม่เดิน → stale
 
 # ลำดับคอลัมน์ = ลำดับใน INSERT (ต้องตรงกับ schema ใน D1)
 COLS = ["uid", "station", "ts", "uptime_s", "temp_c", "throttled", "volts_core",
         "freq_arm_mhz", "load1", "load5", "load15", "mem_avail_mb", "disk_used_pct",
-        "msg_per_s", "aircraft", "health"]
+        "msg_per_s", "aircraft", "health", "pixoo_ts"]
+# ⚠️ เพิ่มชื่อใน COLS = ต้อง ALTER TABLE ใน D1 "ก่อน" โค้ดใหม่ลงเครื่องเสมอ — INSERT ระบุชื่อคอลัมน์
+# ชัดเจน ถ้าปลายทางยังไม่มีคอลัมน์นั้นจะ error ทุกรอบ แล้วกล่องดำตาบอดทั้งตัว ไม่ใช่แค่ฟิลด์เดียวหาย
+# (ลำดับที่ถูก: ALTER ที่ D1 → merge → autoupdate. สลับลำดับแล้วจะเสียข้อมูลช่วงคาบเกี่ยว)
 
 
 def load_env(path):
@@ -135,6 +139,17 @@ def read_disk_used_pct():
         return None
 
 
+def read_pixoo_ts():
+    """เวลาที่ Pixoo push สำเร็จล่าสุด (main.py เขียน /run/pixoo/status.json) หรือ None ถ้าไม่มี.
+    เก็บเป็น "เวลาดิบ" ไม่ใช่ "อายุ" เพราะอายุคำนวณจาก ts ของแถวได้อยู่แล้ว แต่เวลาดิบตอบได้ด้วยว่า
+    จอหยุดตอนกี่โมงเป๊ะ ๆ ซึ่งคือคำถามที่ตอบไม่ได้ตอนไฟดับ 6 ต.ค. 2026 (จอดับครึ่งวัน health=ok ตลอด)."""
+    try:
+        with open(PIXOO_F) as f:
+            return int(json.load(f).get("ts"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def read_feeder():
     try:
         with open(STATUS_F) as f:
@@ -164,6 +179,7 @@ def snapshot():
         "mem_avail_mb": read_mem_avail_mb(),
         "disk_used_pct": read_disk_used_pct(),
         "msg_per_s": mps, "aircraft": ac, "health": health,
+        "pixoo_ts": read_pixoo_ts(),
     }
 
 
@@ -208,8 +224,9 @@ CREATE TABLE IF NOT EXISTS heartbeat (
   uid TEXT PRIMARY KEY, station TEXT, ts INTEGER, uptime_s INTEGER,
   temp_c REAL, throttled INTEGER, volts_core REAL, freq_arm_mhz INTEGER,
   load1 REAL, load5 REAL, load15 REAL, mem_avail_mb INTEGER, disk_used_pct INTEGER,
-  msg_per_s REAL, aircraft INTEGER, health TEXT
+  msg_per_s REAL, aircraft INTEGER, health TEXT, pixoo_ts INTEGER
 );
+-- ตารางที่สร้างไว้ก่อนมี pixoo_ts: ALTER TABLE heartbeat ADD COLUMN pixoo_ts INTEGER;
 CREATE INDEX IF NOT EXISTS idx_hb_station_ts ON heartbeat(station, ts);
 """
 

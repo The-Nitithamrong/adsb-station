@@ -93,7 +93,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 - `flightwatch/adsb_view.py` — live aircraft table (debug/inspect).
 - `report/daily_status.py` (+ `systemd/adsb-daily-report.{service,timer}`) — sends a once-a-day Telegram
   digest at 09:00 Asia/Bangkok (timer `OnCalendar=... Asia/Bangkok`): feeder health/rate/aircraft (from
-  status.json) + Pi uptime/temp/throttle(undervoltage)/load/disk/RAM + today's fan on-count/on-time.
+  status.json) + Pi uptime/temp/throttle(undervoltage)/load/disk/RAM + display liveness + today's fan
+  on-count/on-time. The display line is reported EVERY day even when fine, like feeder and load — a line
+  that only appears when something breaks cannot be told apart from the monitor itself having broken,
+  which is the same trap that made `fr24feed-status` untrustworthy.
   stdlib (urllib), reuses TG_API/TG_CHAT. Heartbeat — the watchdog L3 station-down alert still fires too.
 - `report/fan_stats.py` — per-day fan on-count + total on-time from `/home/arin/fan_events.jsonl`
   (append-only `{ts,on}` log written by mqtt_publish on every switch on↔off transition, ~1-min res).
@@ -103,7 +106,13 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (reuses outbox's D1 pattern; `uid`=station:ts + `INSERT OR IGNORE` = idempotent) AND appends to local
   `/home/arin/heartbeat.jsonl` backup. Snapshot = `throttled` (RAW hex — keeps sticky "occurred" bits
   0x1_0000+ so a brief undervoltage between ticks is caught), `volts_core`, `temp_c`, `freq_arm_mhz`,
-  `load1/5/15`, `mem_avail_mb`, `disk_used_pct`, `uptime_s`, feeder `msg_per_s/aircraft/health`.
+  `load1/5/15`, `mem_avail_mb`, `disk_used_pct`, `uptime_s`, feeder `msg_per_s/aircraft/health`, and
+  `pixoo_ts` (last successful display push, from `/run/pixoo/status.json` — stored RAW, not as an age,
+  because the age is derivable from the row's own `ts` while the raw time also answers "it stopped at
+  exactly what o'clock", which is what could not be answered during the 6 Oct 2026 outage).
+  ⚠️ ADDING A NAME TO `COLS` REQUIRES `ALTER TABLE` ON D1 **BEFORE** the code reaches the Pi. The INSERT
+  names its columns, so a missing column at the sink errors every run and the black box goes blind
+  entirely — not just one field. Correct order: ALTER on D1 → merge → autoupdate.
   WHY: journald keeps getting wiped by the freeze (green-LED-stuck kernel hang) — cloud survives it, so
   the LAST row before the silence gap = the pre-hang state. Reboot shows as `uptime_s` dropping (that
   also separates a real hang from a mere network drop — a net drop leaves `uptime_s` climbing). Hang
@@ -222,8 +231,16 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   means a code edit + PR + merge + waiting for autoupdate just to change one number; in the env file it
   is one line and a restart (same reasoning as MQTT_HOST when HA moved to Pi#2). The REAL fix is a DHCP
   reservation on the router binding the Pixoo's MAC — this only makes the next move cheap to recover
-  from. NOTHING MONITORS THE DISPLAY: the Pi's own heartbeat says `health: ok` the whole time a dead
-  Pixoo is showing a frozen frame, so nobody finds out until they look at it.
+  from.
+  DISPLAY LIVENESS: `mark_push_ok()` stamps `/run/pixoo/status.json` `{ts, ip}` on every SUCCESSFUL
+  push (throttled to `PIXOO_STATUS_SEC`=30s — pushes happen `ANIM_FPS`/sec, which is far finer than
+  anyone needs). Success is the right trigger because a dead service, a long run of failed pushes and a
+  display that fell off the network all freeze the same timestamp, and that single condition — "the
+  screen is not updating" — is the one worth knowing; the cause is in the journal. Read by
+  `heartbeat.py` (→ D1 `pixoo_ts`) and `daily_status.py` (the 09:00 digest line). Before this, the Pi's
+  own heartbeat reported `health: ok` for the entire half day the display was dead, because it measures
+  the Pi, not the screen. The write is wrapped in try/except on purpose: a missing `/run/pixoo` must
+  never be the reason the display stops.
   PUSH HANG (fixed): the `pixoo` lib calls `requests` with NO timeout — a WiFi/router blip mid-push left the
   socket half-open and the loop BLOCKED FOREVER (display froze, `pixoo.service` still "active" but ~0 CPU, no
   log, no exception → the try/except never fired). Fix: main monkeypatches `requests.Session.request` to
@@ -337,6 +354,10 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   `RuntimeDirectoryPreserve=yes` so the oneshot's dir survives between runs):
   `{ts, summary, code, route, start_ts, start_str, in_min, all_day}` or `{ts, summary: null}` when no
   upcoming event. Pixoo recomputes `in_min` live from `start_ts` each tick (fetched value can be stale).
+- `/run/pixoo/status.json` — written by pixoo/main.py (arin; via `RuntimeDirectory=pixoo` +
+  `RuntimeDirectoryPreserve=yes`): `{ts, ip}` stamped on every successful push, throttled to ~30s.
+  Preserve=yes matters: if the file vanished when the service stopped, "just died" and "dead for three
+  days" would look identical, and the frozen timestamp IS the evidence. Consumers: heartbeat.py, daily_status.py.
 - `/run/adsb-ha/fan.json` — written by mqtt_publish (arin; via `RuntimeDirectory=adsb-ha` +
   `RuntimeDirectoryPreserve=yes`): `{ts, on}` where `on` = true/false/null (null = HA fan topic not
   set up / bridge down). Source = HA automation republishing the Tuya switch state to `adsb/<sid>/fan`.

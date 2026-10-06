@@ -12,6 +12,8 @@ import time as _time
 ENV_FILE = "/etc/fr24-watchdog.env"
 STATUS_F = "/run/fr24-watchdog/status.json"
 STALE_SEC = 20 * 60          # status.json เก่ากว่านี้ = watchdog ไม่เดิน → stale
+PIXOO_F = "/run/pixoo/status.json"   # pixoo/main.py ประทับเวลาทุกครั้งที่ push สำเร็จ
+PIXOO_FRESH_SEC = 10 * 60    # จอเขียนทุก ~30 วิ → เกิน 10 นาที = หยุดจริง (เผื่อช่วงกำลังรีสตาร์ต)
 _THR = [(0x1, "undervoltage"), (0x4, "throttled"), (0x2, "freq-capped"), (0x8, "soft-temp")]
 FEED_EMOJI = {"ok": "✅", "recovering": "⚠️", "dead": "🔴", "stale": "❓"}
 
@@ -120,6 +122,7 @@ def build_message():
     tstr = f"{temp:.0f}°C" if temp is not None else "?"
     thr_str = ("⚡ok" if thr == "ok" else f"⚠️ {thr}") if thr is not None else "⚡?"
     host = socket.gethostname()
+    pixoo_line = f"\n{pixoo_status()}"
     fan_line = ""
     try:
         import fan_stats
@@ -135,8 +138,26 @@ def build_message():
         f"{st.get('aircraft', 0)} ลำ\n"
         f"🖥 Pi: up {fmt_uptime(up)} · {tstr} · {thr_str}\n"
         f"📊 load {read_load()} · disk {read_disk_pct()} · RAM {read_mem_free()} ว่าง"
+        f"{pixoo_line}"
         f"{fan_line}"
     )
+
+
+def pixoo_status():
+    """บรรทัดสถานะจอใน digest — ตอบคำถาม "จอยังรับภาพอยู่มั้ย" ซึ่งไม่มีอะไรในระบบตอบได้มาก่อน.
+    ตอนไฟดับ 6 ต.ค. 2026 จอดับครึ่งวันโดยที่ feeder/Pi เขียว ok ทุกบรรทัด (DHCP ย้าย IP จอ) —
+    ข้อมูลที่ Pi ผลิตยังสดตลอด แค่ไม่มีใครส่งขึ้นจอ กว่าจะรู้คือเดินไปเห็นเอง.
+    รายงานทุกวันแม้ปกติ (เหมือน feeder/load) — บรรทัดที่โผล่เฉพาะตอนพังจะแยก "ไม่พัง" กับ
+    "ตัวเฝ้าเองพัง" ไม่ออก ซึ่งเป็นกับดักเดียวกับที่ทำให้ fr24feed-status เชื่อถือไม่ได้."""
+    try:
+        with open(PIXOO_F) as f:
+            d = json.load(f)
+        age = _time.time() - float(d["ts"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return "🖼 จอ: ไม่มีข้อมูล (pixoo ไม่ได้เขียน status)"
+    if age <= PIXOO_FRESH_SEC:
+        return f"🖼 จอ: ok ({d.get('ip', '?')})"
+    return f"⚠️ 🖼 จอ: เงียบมา {fmt_uptime(age)} — เช็ค pixoo.service / IP จอ"
 
 
 def send(text):
