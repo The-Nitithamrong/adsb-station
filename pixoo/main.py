@@ -8,7 +8,7 @@ from pixoo import Pixoo
 import renderer as R
 from pages import PAGES, coffee_break, knock_off
 
-PIXOO_IP   = "192.168.41.143"
+ENV_FILE   = "/etc/fr24-watchdog.env"   # config ร่วมกับ service อื่น (MQTT_HOST ก็อยู่ที่นี่)
 STATUS_F   = "/run/fr24-watchdog/status.json"
 THA_F      = "/run/flight-watcher/inbound.json"   # THA inbound (เขียนโดย flight_watcher.py)
 AGENDA_F   = "/run/agenda/next.json"               # เที่ยวบินถัดไป (เขียนโดย agenda_fetch.py)
@@ -38,6 +38,33 @@ NAP_BEFORE_H = 24             # nap mode: เงียบ buzzer อัตโน
 # on 500ms / off 500ms วนจน PlayTotalTime=5000 → บี๊บเว้นจังหวะ ~5 บี๊บ ใน 5 วิ. (POST เดียว, เครื่องเล่นเอง)
 COFFEE_BUZZ = {"Command": "Device/PlayBuzzer",
                "ActiveTimeInCycle": 500, "OffTimeInCycle": 500, "PlayTotalTime": 5000}
+
+
+# --- IP ของจอ: อ่านจาก env ก่อน แล้วค่อย fallback เป็นค่าที่เห็นล่าสุด
+# ทำไมไม่ตรึงไว้ในโค้ด: ไฟดับทั้งบ้าน 6 ต.ค. 2026 → Pixoo รีบูตแล้วได้ IP ใหม่จาก DHCP
+# (.143 → .144) จอเลยดับเงียบครึ่งวันโดยไม่มีใครรู้ ขณะที่ Pi ยังทำงานปกติทุกอย่าง
+# ตรึงใน git = ต้องแก้โค้ด + merge + รอ autoupdate เพียงเพื่อเปลี่ยนตัวเลขเดียว
+# อยู่ใน env = แก้ไฟล์เดียวแล้ว restart จบ (แบบเดียวกับ MQTT_HOST ตอนย้าย HA ไป Pi#2)
+# ⚠️ ทางแก้ที่ถาวรจริงคือจอง DHCP (ผูก MAC ของจอกับ IP) ที่เราเตอร์ — ตัวนี้แค่ทำให้
+#    ตอนมันย้ายอีกครั้ง แก้ได้ใน 30 วินาทีโดยไม่ต้องแตะ repo
+def _env(key, default):
+    try:
+        with open(ENV_FILE) as f:
+            for ln in f:
+                ln = ln.strip()
+                if ln.startswith("#") or "=" not in ln:
+                    continue
+                k, v = ln.split("=", 1)
+                if k.strip() == key:
+                    v = v.strip().strip('"').strip("'")
+                    if v:
+                        return v
+    except OSError:
+        pass                      # ไฟล์อ่านไม่ได้ (สิทธิ์/ไม่มี) → ใช้ค่า default เงียบ ๆ
+    return default
+
+
+PIXOO_IP = _env("PIXOO_IP", "192.168.41.144")
 
 
 # --- robustness: pixoo lib เรียก requests แบบไม่ตั้ง timeout → WiFi/router สะดุดกลาง push = block ตลอดกาล
