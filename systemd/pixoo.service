@@ -10,6 +10,12 @@ WorkingDirectory=/home/arin/adsb-station/pixoo
 ExecStart=/usr/bin/python3 /home/arin/adsb-station/pixoo/main.py
 Restart=always
 RestartSec=10
+# สร้าง /run/pixoo (owned by arin) → main.py เขียน status.json ทุกครั้งที่ push สำเร็จ
+# ให้ heartbeat.py (→ D1) กับ daily_status.py (digest 09:00) รู้ว่าจอยังรับภาพอยู่มั้ย
+# Preserve=yes เพื่อให้ไฟล์อยู่รอดถ้า service ตาย — เวลาที่ค้างอยู่คือหลักฐานว่าหยุดตอนไหน
+# (ถ้าลบตอน stop จะแยก 'เพิ่งตาย' กับ 'ตายมาสามวัน' ไม่ออก ซึ่งเป็นข้อมูลที่ต้องการที่สุด)
+RuntimeDirectory=pixoo
+RuntimeDirectoryPreserve=yes
 
 [Install]
 WantedBy=multi-user.target

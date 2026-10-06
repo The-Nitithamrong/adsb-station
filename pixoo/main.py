@@ -66,6 +66,28 @@ def _env(key, default):
 
 PIXOO_IP = _env("PIXOO_IP", "192.168.41.144")
 
+# --- เฝ้าจอ: ประทับเวลา "push สำเร็จล่าสุด" ให้คนอื่นอ่าน
+# ทำไมต้องมี: ตอนไฟดับ 6 ต.ค. 2026 จอดับครึ่งวันโดย heartbeat รายงาน health=ok ทุกแถว —
+# เพราะมันวัดสุขภาพ Pi ไม่ได้วัดว่าจอยังรับภาพอยู่มั้ย กว่าจะรู้คือเดินไปเห็นเอง
+# เขียนเฉพาะตอน push "สำเร็จ": ไม่ว่า service จะตาย, push fail ยาว, หรือจอหลุด network
+# ไฟล์ก็หยุดเดินเหมือนกันหมด ซึ่งคือเงื่อนไขที่สนใจจริง ๆ ไม่ต้องแยกสาเหตุตรงนี้
+PIXOO_STATUS_F   = "/run/pixoo/status.json"   # ผู้อ่าน: heartbeat.py (→ D1) + daily_status.py (digest)
+PIXOO_STATUS_SEC = 30         # throttle — push เกิด ANIM_FPS ครั้ง/วินาที แต่ความละเอียด 30 วิก็เกินพอ
+_last_status_write = 0.0
+
+
+def mark_push_ok():
+    global _last_status_write
+    now = time.time()
+    if now - _last_status_write < PIXOO_STATUS_SEC:
+        return
+    _last_status_write = now
+    try:
+        with open(PIXOO_STATUS_F, "w") as f:
+            json.dump({"ts": int(now), "ip": PIXOO_IP}, f)   # ip ไว้ยืนยันว่าคุยกับเครื่องไหนอยู่
+    except OSError:
+        pass          # /run/pixoo ไม่มี (unit เก่ายังไม่มี RuntimeDirectory) — ห้ามให้เรื่องนี้ทำให้จอดับ
+
 
 # --- robustness: pixoo lib เรียก requests แบบไม่ตั้ง timeout → WiFi/router สะดุดกลาง push = block ตลอดกาล
 #     (จอค้างเฟรมเดิม, service ยัง active แต่ loop ตายอยู่ที่ socket — ไม่ throw, except เดิมเลยไม่ทำงาน).
@@ -274,6 +296,7 @@ def main():
                 pixoo.draw_image(img)
                 pixoo.push()
                 fails = 0
+                mark_push_ok()
             except Exception as e:
                 # Pixoo หลุด network (WiFi/router สะดุด, No route to host, timeout) → อย่า crash/spin เร็ว
                 fails += 1
