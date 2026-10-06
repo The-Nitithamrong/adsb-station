@@ -215,6 +215,15 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   page), the clock colon blinks 1 Hz (`draw_header` swaps ':'→' ', same glyph width so digits don't shift),
   and the UP-page fan spins when on (`draw_fan(...,frame=)` alternates 2 blade frames). Push wrapped in
   try/except (Pixoo WiFi drops crash-looped before). Tune SCAN_SPEED/SCAN_TAIL in renderer, ANIM_FPS in main.
+  DEVICE IP IS NOT HARDCODED — `PIXOO_IP` is read from /etc/fr24-watchdog.env, falling back to the
+  last known address. A house-wide power cut (6 Oct 2026) rebooted the Pixoo along with everything
+  else and DHCP handed it a new address (.143 → .144), so the display sat dead for half a day while
+  the Pi itself was perfectly healthy and every other service kept running. Pinning the address in git
+  means a code edit + PR + merge + waiting for autoupdate just to change one number; in the env file it
+  is one line and a restart (same reasoning as MQTT_HOST when HA moved to Pi#2). The REAL fix is a DHCP
+  reservation on the router binding the Pixoo's MAC — this only makes the next move cheap to recover
+  from. NOTHING MONITORS THE DISPLAY: the Pi's own heartbeat says `health: ok` the whole time a dead
+  Pixoo is showing a frozen frame, so nobody finds out until they look at it.
   PUSH HANG (fixed): the `pixoo` lib calls `requests` with NO timeout — a WiFi/router blip mid-push left the
   socket half-open and the loop BLOCKED FOREVER (display froze, `pixoo.service` still "active" but ~0 CPU, no
   log, no exception → the try/except never fired). Fix: main monkeypatches `requests.Session.request` to
@@ -335,6 +344,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
 
 ## Conventions / guardrails
 - SECRETS live ONLY in /etc/fr24-watchdog.env (TG_API, TG_CHAT, HC_URL, D1_*, MQTT_*, GCAL_ICS_URL, ETA_INGEST_KEY). NEVER commit .env or *.db.
+  The same file also holds NON-secret host config that DHCP can move under us — `MQTT_HOST`, `PIXOO_IP` —
+  so a device changing address is a one-line edit + restart, not a code change waiting on a merge.
   (GCAL_ICS_URL is a private calendar link — treat as secret; anyone with it reads your calendar.)
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
   - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
