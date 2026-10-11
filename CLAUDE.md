@@ -284,8 +284,9 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   Home is requested BY DISTRICT NAME (`WX_HOME_PROVINCE`/`WX_HOME_AMPHOE`, Thai, default คลองสามวา) — this
   repo is public, home coordinates must never be committed.
   GOTCHA: TMD's docs contradict the live API — the doc sample is `{"weather_forecast":{"locations":[…]}}` but the
-  real body is `{"WeatherForecasts":[…]}` (reported by a third party who measured it); `tmd_locations()` accepts
-  both. The docs also say daily horizon "126 days" (front page: 10 days). `--probe` prints the real shape.
+  real body is `{"WeatherForecasts":[…]}` (CONFIRMED live 2026-10-11 by the weather-probe workflow with our
+  token: HTTP 200, `place` resolved คลองสามวา as `areatype: amphoe`, CNX `/at` snapped ~1 km away);
+  `tmd_locations()` accepts both. The docs also say daily horizon "126 days" (front page: 10 days).
   TMD has NO rain-probability field (only `rain` mm + `cond` 1–12); `cond` 9–11/12 describe TEMPERATURE
   (cold/cool/very hot), not sky — drawn as a sun in blue/red, never a snowflake. Codes are normalised to one
   `kind` in the fetcher so the page doesn't care which source it came from.
