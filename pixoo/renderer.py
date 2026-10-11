@@ -222,3 +222,35 @@ def draw_fan(d, x, y, color, frame=0):
     """พัดลม/ใบพัดพิกเซล 7x7 (สีเขียว=หมุน, หรี่=ปิด). frame สลับ = ใบพัดหมุน"""
     for dx, dy in _FAN_FRAMES[frame % len(_FAN_FRAMES)]:
         d.point((x + dx, y + dy), fill=color)
+
+
+# ---- ไอคอนสภาพอากาศ 7x7 — ตัวอักษร = สี: S แดด · C เมฆ · R ฝน · B ฟ้าผ่า · W หิมะ · F หมอก ----
+_SUN = ["...S...", ".S...S.", "..SSS..", "S.SSS.S", "..SSS..", ".S...S.", "...S..."]
+_WX_ICONS = {
+    "clear":  _SUN,
+    "cool":   _SUN,      # TMD 9–11 หนาว/เย็น = คำบอกอุณหภูมิ ฟ้ามักโปร่ง → แดดสีฟ้า (ไม่ใช่หิมะ)
+    "hot":    _SUN,      # TMD 12 ร้อนจัด → แดดสีส้มแดง
+    "partly": [".S.S...", "..SSS..", ".SSCC..", "..CCCC.", ".CCCCCC", "CCCCCCC", "......."],
+    "cloudy": [".......", ".......", "..CC...", ".CCCCC.", "CCCCCCC", "CCCCCCC", "......."],
+    "rain":   ["..CC...", ".CCCCC.", "CCCCCCC", "CCCCCCC", ".......", ".R.R.R.", "R.R.R.."],
+    "heavy":  ["..CC...", ".CCCCC.", "CCCCCCC", "CCCCCCC", "R.R.R.R", ".R.R.R.", "R.R.R.R"],
+    "storm":  ["..CC...", ".CCCCC.", "CCCCCCC", "CCCCCCC", "...BB..", "..BB...", "...B..."],
+    "snow":   ["..CC...", ".CCCCC.", "CCCCCCC", "CCCCCCC", ".......", ".W.W.W.", "W.W.W.."],
+    "fog":    [".......", "FFFFFF.", ".......", ".FFFFFF", ".......", "FFFFFF.", "......."],
+}
+_WX_SUN_COLOR = {"cool": (127, 216, 232), "hot": (240, 100, 50)}
+_WX_COLOR = {"S": (245, 200, 60), "C": (170, 180, 195), "R": (90, 159, 224),
+             "B": (245, 220, 70), "W": (235, 240, 250), "F": (130, 140, 155)}
+
+
+def draw_wx(d, x, y, kind):
+    """ไอคอนสภาพอากาศ 7x7 ตาม kind (จาก weather_fetch). kind ไม่รู้จัก = ไม่วาด (ไม่เดา)"""
+    rows = _WX_ICONS.get(kind)
+    if not rows:
+        return
+    for ry, row in enumerate(rows):
+        for rx, ch in enumerate(row):
+            if ch == ".":
+                continue
+            c = _WX_SUN_COLOR.get(kind, _WX_COLOR["S"]) if ch == "S" else _WX_COLOR[ch]
+            d.point((x + rx, y + ry), fill=c)

@@ -1,0 +1,38 @@
+name: Weather probe
+
+# เรียก TMD + Open-Meteo ของจริงด้วย parser ตัวเดียวกับที่รันบน Pi (weather_fetch.py --probe)
+# → รู้ก่อน deploy ว่า token ใช้ได้ และ JSON ที่ API ตอบจริงตรงกับที่โค้ดคาด (doc ของ TMD ขัดกันเอง).
+# token มาจาก repo secret TMD_TOKEN — script พิมพ์แค่ "set/NOT SET" และ GitHub mask ค่าใน log ให้อีกชั้น.
+# รันเมื่อ weather/ เปลี่ยน หรือกดมือ (Actions → Weather probe → Run workflow).
+# ไม่รันบน pull_request: PR จาก fork ไม่ได้ secret อยู่แล้ว และไม่ควรให้โค้ดคนนอกแตะ token.
+on:
+  workflow_dispatch:
+    inputs:
+      airports:
+        description: "IATA codes to probe (space separated)"
+        default: "CNX TPE"
+  push:
+    paths:
+      - "weather/**"
+      - ".github/workflows/weather-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Probe TMD + Open-Meteo
+        env:
+          TMD_TOKEN: ${{ secrets.TMD_TOKEN }}
+          AIRPORTS: ${{ github.event.inputs.airports || 'CNX TPE' }}
+        # AIRPORTS ผ่าน env (ไม่แทรก ${{ }} ลง shell ตรง ๆ) กัน input ถูกตีความเป็นคำสั่ง
+        run: python weather/weather_fetch.py --probe $AIRPORTS

@@ -59,7 +59,7 @@ publish payload ว่างทับ topic เดิม.
 ## ติดตั้ง (Pi#2) — bootstrap ครั้งเดียว
 ```bash
 sudo apt install -y git mosquitto-clients      # mosquitto_pub/sub
-git clone https://github.com/iamkkn/adsb-station /home/arin/adsb-station   # user arin (Pi#2 = ArinII)
+git clone https://github.com/The-Nitithamrong/adsb-station /home/arin/adsb-station   # user arin (Pi#2 = ArinII)
 
 cd /home/arin/adsb-station
 sudo cp pi-ha/peer-watchdog/config.env.example /etc/fleet-peer-watchdog.env
@@ -91,7 +91,9 @@ journalctl -u pi-ha-autoupdate -f              # ดูรอบ pull
 - unit file (`.service`/`.timer`) `git pull` **ไม่**อัปเดต `/etc/systemd/system/` ให้ — autoupdate
   `cp` + `daemon-reload` ให้เมื่อ `pi-ha/systemd/` เปลี่ยน (เหมือน GOTCHA ของ Pi#1).
 - service/timer ใหม่ใน `pi-ha/systemd/` ที่ยัง `disabled` → autoupdate `enable --now` ให้เอง.
-  อยากปิดตัวไหนถาวรใช้ `sudo systemctl mask <unit>`.
+  อยากปิดตัวไหนถาวร **อย่าใช้ `systemctl mask`** — autoupdate วางไฟล์ unit จริงไว้ที่ `/etc/systemd/system/`
+  แล้ว mask (ต้องสร้าง symlink ชื่อเดียวกัน) จะล้มเหลว. ใช้ drop-in condition แทน (วิธีเดียวกับ Pi#1 —
+  ดูหัวไฟล์ `deploy/adsb-autoupdate.sh`).
 - repo ต้องสะอาด (ไม่มี local edit) ไม่งั้น `merge --ff-only` ข้าม — อย่าแก้ไฟล์บน Pi#2 ตรงๆ.
 
 ### SSH forced-command ฝั่ง Pi#1 (สำหรับ L2)
@@ -103,7 +105,9 @@ command="/usr/local/bin/fleet-cmd",no-port-forwarding,no-x11-forwarding,no-agent
 ```
 
 `fleet-cmd` (บน Pi#1) อ่าน `$SSH_ORIGINAL_COMMAND` แล้วยอมเฉพาะ `restart-services` /
-`reboot` / `status` เท่านั้น. (สคริปต์ฝั่ง Pi#1 อยู่ในงาน Pi#1 — ยังไม่รวมในโฟลเดอร์นี้.)
+`reboot` / `status` เท่านั้น. สคริปต์อยู่ที่ `deploy/fleet-cmd` (+ sudoers `deploy/fleet-cmd.sudoers`) —
+ขั้นติดตั้งฝั่ง Pi#1 ดู [`ha/HEALTH_AGENT.md`](../../ha/HEALTH_AGENT.md). ทดสอบจาก Pi#2:
+`ssh -i ~/.ssh/fleet_id arin@<Pi#1> status` (ต้องได้ active) · `... whoami` (ต้องถูกปฏิเสธ = forced-command ทำงาน).
 
 ## เปิดของจริง
 เมื่อพิสูจน์แล้วว่า L0→L3 เดินถูกใน DRY-RUN (ดู Telegram + `journalctl`): ตั้ง `DRY_RUN=0` ใน

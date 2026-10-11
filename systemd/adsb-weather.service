@@ -1,0 +1,15 @@
+[Unit]
+Description=Fetch weather forecast (home + next-flight destination) -> /run/weather/forecast.json for Pixoo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=arin
+# systemd อ่าน env ในฐานะ root แล้วส่งเข้ามา (TMD_TOKEN) — ไฟล์เป็น root-only (chmod 600)
+EnvironmentFile=/etc/fr24-watchdog.env
+ExecStart=/usr/bin/python3 /home/arin/adsb-station/weather/weather_fetch.py
+# สร้าง /run/weather (owned by arin) → เขียน forecast.json ให้ Pixoo
+# Preserve=yes: oneshot จบแล้ว dir ต้องอยู่ต่อ ไม่งั้นไฟล์หายทันทีที่รันเสร็จ
+RuntimeDirectory=weather
+RuntimeDirectoryPreserve=yes

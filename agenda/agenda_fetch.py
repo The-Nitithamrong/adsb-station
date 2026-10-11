@@ -156,12 +156,16 @@ def build_payload(ev, now):
     if r:
         route = f"{r.group(1).upper()}-{r.group(2).upper()}"
     st = ev["start"]
+    en = ev.get("end")
     return {
         "ts": ts,
         "summary": summ,
         "code": code,
         "route": route,
         "start_ts": int(st.timestamp()),
+        # เวลาถึง (DTEND) — weather_fetch ใช้เลือก "วันที่บินถึง" ของพยากรณ์ปลายทาง
+        # (บินกลางคืนข้ามวัน เช่น ออก 23:00 ถึง 07:00 = พยากรณ์ของวันถัดไป)
+        "end_ts": int(en.timestamp()) if en else None,
         "start_str": st.astimezone(_local_tz()).strftime("%d/%m %H:%M"),
         "in_min": int((st.timestamp() - now.timestamp()) / 60),
         "all_day": bool(ev.get("all_day")),

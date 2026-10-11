@@ -12,6 +12,7 @@ flight watcher, and Pixoo 64 status display.
 | `watchdog/` | `fr24-watchdog.sh` — เช็ค data-flow จริง (port 30003), restart → uhubctl USB power-cycle → Telegram + healthchecks.io |
 | `flightwatch/` | `flight_watcher.py` — THA inbound VTBS, ETA<=30m → Telegram + SQLite · `adsb_view.py` — ตารางเครื่องบินสด |
 | `pixoo/` | `renderer.py` / `pages.py` / `main.py` — จอสถานะ Pixoo 64 (ต้องมี PixelOperator*.ttf) |
+| `weather/` | `weather_fetch.py` — พยากรณ์อากาศบ้าน + ปลายทางเที่ยวบินถัดไป (TMD / Open-Meteo) → หน้า `WX` |
 | `systemd/` | unit files ของทุก service |
 
 ## Deploy (บน Pi — ครั้งเดียว)
@@ -217,6 +218,43 @@ sudo systemctl start adsb-agenda      # ดึงรอบแรกเลย · 
 ```
 (รันจาก repo → auto-update ดูแลให้; unit อยู่ใน `systemd/` → timer restart อัตโนมัติ. หน้า `NEXT`
 โผล่ใน rotation ของ Pixoo เอง; ถ้าไม่มีนัดจะโชว์ "no flt". ทดสอบ: `python3 agenda/agenda_fetch.py`)
+
+## พยากรณ์อากาศบน Pixoo (optional — บ้าน + เมืองปลายทางของเที่ยวบินถัดไป)
+
+หน้า `WX` โชว์ 2 แถว: **บ้าน** (พยากรณ์วันนี้) และ **เมืองปลายทาง** ของเที่ยวบินถัดไปในปฏิทิน
+(พยากรณ์ของ "วันที่บินถึง" — แถวล่างบอก `ARR dd/mm`). แต่ละแถว = รหัสเมือง · ไอคอน · สูงสุด/ต่ำสุด °C.
+`weather/weather_fetch.py` รันทุก 1 ชม. → `/run/weather/forecast.json`.
+
+| ที่ไหน | แหล่ง | เหตุผล |
+|---|---|---|
+| ในไทย (บ้าน + ปลายทางในประเทศ) | **TMD** กรมอุตุนิยมวิทยา (NWP API) | ต้องมี token |
+| ต่างประเทศ | **Open-Meteo** (ไม่ต้องใช้ key, CC BY 4.0) | แบบจำลอง TMD ครอบคลุมแค่เอเชียตะวันออกเฉียงใต้ |
+
+มุมขวาของจอบอกที่มา (`TMD` / `OM`). ปลายทางในไทยถ้า TMD ใช้ไม่ได้จะตกไป Open-Meteo เอง.
+ต้องเปิด **Next flight** (หัวข้อบน) ก่อน — ปลายทางมาจาก route ใน event (`BKK-TPE` → TPE).
+
+**1. ขอ token TMD**: สมัครที่ https://data.tmd.go.th/nwpapi/register → Login → **Create New Token**
+(⚠️ token โชว์ครั้งเดียว — คัดลอกเก็บทันที).
+
+**2. เพิ่มลง `/etc/fr24-watchdog.env`** (ไม่ขึ้น repo — secret ใน GitHub ไม่ลงมาถึง Pi):
+```bash
+TMD_TOKEN=<token>
+# (ไม่บังคับ) บ้านอยู่อำเภออื่น — ชื่อภาษาไทยตามที่ TMD รู้จัก · label = 3 ตัวที่โชว์บนจอ
+# WX_HOME_PROVINCE=กรุงเทพมหานคร
+# WX_HOME_AMPHOE=คลองสามวา
+# WX_HOME_LABEL=BKK
+```
+ใช้ชื่ออำเภอ ไม่ใช้พิกัด — repo นี้ public พิกัดบ้านห้ามอยู่ใน git.
+
+**3. deploy**: merge แล้ว autoupdate enable `adsb-weather.timer` + restart pixoo ให้เอง (ไม่ต้อง SSH).
+ดึงรอบแรกทันที: `sudo systemctl start adsb-weather` · log: `journalctl -u adsb-weather` ·
+ดูผล: `cat /run/weather/forecast.json`.
+
+**ทดสอบ token/API โดยไม่แตะ Pi**: GitHub → Actions → **Weather probe** → Run workflow
+(ใช้ repo secret `TMD_TOKEN` — คนละที่กับ env บน Pi ต้องใส่ทั้งสองที่; รันเองด้วยเมื่อ `weather/` เปลี่ยน).
+
+ตารางสนามบิน `weather/airports.csv` มาจาก OurAirports (public domain) — รีเฟรชด้วย
+`weather/build_airports.py` (วิธีอยู่หัวไฟล์). ปลายทางไม่อยู่ในตาราง → log เตือน แถวปลายทางโชว์ `--`.
 
 ## พัดลมระบายความร้อน + สถานะบน Pixoo (optional — HA/Tuya)
 

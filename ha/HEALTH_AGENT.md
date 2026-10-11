@@ -57,9 +57,14 @@ mosquitto default ฟังแค่ localhost → Pi#1 ต่อข้ามเ
 ```bash
 cd /home/arin/adsb-station
 sudo cp pi-ha/mosquitto/fleet.conf /etc/mosquitto/conf.d/fleet.conf
-sudo mosquitto_passwd -c /etc/mosquitto/fleet.passwd fleet     # ตั้งรหัส user "fleet"
+sudo mosquitto_passwd /etc/mosquitto/fleet.passwd fleet        # เพิ่ม/เปลี่ยนรหัส user "fleet" (ไม่มี -c)
 sudo systemctl restart mosquitto
 ```
+
+> ⚠️ **ห้ามใส่ `-c`** ถ้า `/etc/mosquitto/fleet.passwd` มีอยู่แล้ว — `-c` = สร้างไฟล์ใหม่ **ทับของเดิม** →
+> user `adsb` (HA + `mqtt_publish`) หายทั้งตัว: HA ต่อ MQTT ไม่ได้ → automation พัดลมหยุด. ดูก่อนว่ามี user
+> อะไรอยู่: `sudo cut -d: -f1 /etc/mosquitto/fleet.passwd`. ใช้ `-c` เฉพาะตอนไฟล์ยังไม่มีจริง ๆ (เครื่องใหม่ —
+> `pi-ha/PI2_PROVISION.md` ข้อ 5).
 
 แล้วใส่ `BROKER_USER=fleet` + `BROKER_PASS=...` ตัวเดียวกันใน env ของ **ทั้ง** Pi#1 health-agent และ
 Pi#2 peer-watchdog (`/etc/fleet-peer-watchdog.env`).

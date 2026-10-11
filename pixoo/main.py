@@ -13,11 +13,13 @@ STATUS_F   = "/run/fr24-watchdog/status.json"
 THA_F      = "/run/flight-watcher/inbound.json"   # THA inbound (เขียนโดย flight_watcher.py)
 AGENDA_F   = "/run/agenda/next.json"               # เที่ยวบินถัดไป (เขียนโดย agenda_fetch.py)
 FAN_F      = "/run/adsb-ha/fan.json"                # สถานะพัดลม (เขียนโดย mqtt_publish.py)
+WX_F       = "/run/weather/forecast.json"           # พยากรณ์อากาศ บ้าน+ปลายทาง (เขียนโดย weather_fetch.py)
 COFFEE_FILE = "/home/arin/pixoo_coffee"            # ปุ่ม coffee บน ESP32 เขียนผ่าน uptime_server (:8099) → runtime on/off
 STALE_SEC  = 20 * 60          # ถ้า status เก่ากว่านี้ = ถือว่า stale
 THA_STALE_SEC = 5 * 60        # inbound เก่ากว่านี้ = ถือว่าไม่มี THA inbound แล้ว
 AGENDA_STALE_SEC = 6 * 3600   # agenda เก่ากว่านี้ (fetch ตายไปนาน) = ไม่โชว์
 FAN_STALE_SEC = 5 * 60        # fan.json เก่ากว่านี้ (bridge ตาย) = ไม่รู้สถานะ
+WX_STALE_SEC = 6 * 3600       # forecast.json เก่ากว่านี้ (timer ตายไปหลายรอบ) = ไม่โชว์
 REFRESH    = 10               # วินาที/รอบ อ่านข้อมูล /run ใหม่ (การอ่าน/subprocess แพง ไม่ทำถี่)
 ANIM_FPS   = 2                # เฟรม/วินาที สำหรับ animation (scanner) — push ถี่ขึ้นแต่ข้อมูลคงเดิม
 PUSH_TIMEOUT = 5              # วินาที — timeout ทุก HTTP ไป Pixoo (กัน push ค้างตอน WiFi หลุด → block ตลอดกาล)
@@ -207,6 +209,35 @@ def read_fan():
         return None
 
 
+def _wx_pick(days, date):
+    # เลือกพยากรณ์ของวันที่ต้องการจาก list (ไม่เจอ = None → หน้าจอโชว์ '--' ไม่เอาวันอื่นมาแทน)
+    for day in days or []:
+        if day.get("date") == date:
+            return day
+    return None
+
+
+def read_weather():
+    # forecast.json → {"home": {label, src, day}, "dest": {label, src, date, day} | None} หรือ None
+    # บ้าน = พยากรณ์ "วันนี้" ตามนาฬิกาเครื่อง (BKK) เลือกสดทุกรอบ — ข้ามเที่ยงคืนแล้วเปลี่ยนวันเอง
+    try:
+        with open(WX_F) as f:
+            w = json.load(f)
+        if time.time() - w.get("ts", 0) > WX_STALE_SEC:
+            return None
+        home = w.get("home") or {}
+        out = {"home": {"label": home.get("label"), "src": home.get("src"),
+                        "day": _wx_pick(home.get("days"), datetime.date.today().isoformat())},
+               "dest": None}
+        dest = w.get("dest")
+        if dest:
+            out["dest"] = {"label": dest.get("label"), "src": dest.get("src"), "date": dest.get("date"),
+                           "day": _wx_pick(dest.get("days"), dest.get("date"))}
+        return out
+    except Exception:
+        return None
+
+
 def coffee_enabled():
     # runtime on/off จากปุ่ม ESP32 (uptime_server เขียน COFFEE_FILE) — ไฟล์หาย = ใช้ค่า COFFEE_ENABLE
     try:
@@ -243,6 +274,7 @@ def main():
         data["svc_name"] = "FDR"
         data["agenda"] = read_agenda()                     # เที่ยวบินถัดไป (Google Calendar)
         data["fan"] = read_fan()                           # สถานะพัดลมระบายความร้อน (จาก HA/Tuya)
+        data["wx"] = read_weather()                        # พยากรณ์อากาศ บ้าน + ปลายทาง
         data["throttled"] = read_throttled()               # undervoltage / thermal throttle (Pi)
 
         # nap mode: เงียบ buzzer อัตโนมัติในช่วง NAP_BEFORE_H ชม. ก่อน event ถัดไป (งีบก่อนบิน)
