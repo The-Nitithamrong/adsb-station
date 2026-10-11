@@ -162,7 +162,9 @@ sudo systemctl daemon-reload ; sudo systemctl enable --now pi-ha-autoupdate.time
 
 ## 11. ⚠️ IP ต้องคงที่ 192.168.41.207
 ของที่ผูกกับ IP นี้ (แก้ถ้า IP เปลี่ยน):
-- **Pi#1** `/etc/fr24-watchdog.env` → `MQTT_HOST=192.168.41.207` → `systemctl restart adsb-ha-mqtt adsb-health-agent`
+- **Pi#1** `/etc/fr24-watchdog.env` → `MQTT_HOST=192.168.41.207` **และ** `BROKER_HOST=192.168.41.207` →
+  `systemctl restart adsb-ha-mqtt adsb-health-agent` (คนละตัวแปร: `mqtt_publish` อ่าน `MQTT_HOST`,
+  `health_agent` อ่าน `BROKER_HOST` เท่านั้น — ไม่ตั้งจะไปต่อ `127.0.0.1` ของ Pi#1 เอง แล้ว heartbeat ไม่ถึง Pi#2)
 - **peer-watchdog** `HA_WEBHOOK_CYCLE=http://192.168.41.207:8123/...`
 - **ESP32** `src/config.h` HA webhook
 
