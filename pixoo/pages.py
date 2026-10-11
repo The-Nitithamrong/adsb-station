@@ -116,6 +116,56 @@ def next_flight(d, data):
     R.text(d, (60, 55), _countdown(mins), "tiny", ccol, anchor="ra")
 
 
+_WARM = (240, 150, 70)      # อุณหภูมิสูงสุด
+_COOL = (127, 216, 232)     # อุณหภูมิต่ำสุด
+
+
+def _wx_row(d, y, label, day):
+    """แถวพยากรณ์ 1 แถว: รหัสเมือง (ซ้าย) · ไอคอน · สูงสุด/ต่ำสุด (ขวา). day=None → '--' เทา"""
+    R.text(d, (4, y), label[:3], "small", R.PALETTE["aircraft"], anchor="la")
+    if not day or day.get("tmax") is None or day.get("tmin") is None:
+        R.text(d, (61, y), "--", "small", R.PALETTE["label"], anchor="ra")
+        return
+    R.draw_wx(d, 23, y, day.get("kind"))
+    hi, lo = str(int(round(day["tmax"]))), str(int(round(day["tmin"])))
+    # 5 ตัว (34/26, -3/-9) พอดีช่อง x31..60 ด้วย small · ยาวกว่านั้น (-12/-20) ลดเป็น tiny ไม่ให้ทับไอคอน
+    font, adv = ("small", 6) if len(hi) + len(lo) + 1 <= 5 else ("tiny", 4)
+    ty = y if font == "small" else y + 1
+    x = 61
+    R.text(d, (x, ty), lo, font, _COOL, anchor="ra")
+    x -= len(lo) * adv
+    R.text(d, (x, ty), "/", font, R.PALETTE["label"], anchor="ra")
+    x -= adv
+    R.text(d, (x, ty), hi, font, _WARM, anchor="ra")
+
+
+def weather(d, data):
+    """หน้า WX — พยากรณ์วันนี้ที่บ้าน + วันที่บินถึงที่ปลายทาง (weather_fetch.py → /run/weather/forecast.json)
+    data["wx"] = {"home": {label, src, day}, "dest": {label, src, date, day} | None} หรือ None"""
+    wx = data.get("wx")
+    R.text(d, (4, 28), "WX", "small", R.PALETTE["title"], anchor="la")
+    if not wx:   # ยังไม่มีไฟล์ / เก่าเกิน → ไม่เดา
+        R.text(d, (32, 42), "NO DATA", "small", R.PALETTE["label"], anchor="ma")
+        return
+
+    home = wx.get("home") or {}
+    if home.get("src"):   # ที่มาของข้อมูลบ้าน (กรมอุตุฯ) มุมขวาบน
+        R.text(d, (61, 29), home["src"], "tiny", R.PALETTE["label"], anchor="ra")
+    _wx_row(d, 37, home.get("label") or "BKK", home.get("day"))
+
+    dest = wx.get("dest")
+    if not dest:
+        R.text(d, (4, 49), "NO FLIGHT", "tiny", R.PALETTE["label"], anchor="la")
+        return
+    _wx_row(d, 47, dest.get("label") or "?", dest.get("day"))
+    # แถวล่าง: วันที่บินถึง (พยากรณ์ของวันนั้น ไม่ใช่วันนี้) · ที่มาของข้อมูลปลายทาง
+    date = dest.get("date") or ""
+    if len(date) == 10:   # "2026-10-13" → "13/10"
+        R.text(d, (3, 56), f"ARR {date[8:10]}/{date[5:7]}", "tiny", R.PALETTE["date"], anchor="la")
+    if dest.get("src"):
+        R.text(d, (61, 56), dest["src"], "tiny", R.PALETTE["label"], anchor="ra")
+
+
 # vcgencmd get_throttled — บิตปัจจุบัน (0-3) เรียงตามความสำคัญ · บิตประวัติ (+16 = เคยเกิด)
 _THR_NOW = [(0x1, "UV"), (0x4, "THR"), (0x2, "CAP"), (0x8, "TMP")]
 _THR_EVER = [(0x10000, "UV"), (0x40000, "THR"), (0x20000, "CAP"), (0x80000, "TMP")]
@@ -228,4 +278,4 @@ def knock_off(d, data):
 
 # registry — หน้าจะหมุนตาม PAGE_HOLD; เพิ่มได้เรื่อยๆ ต่อท้าย
 # (tha_inbound / flights_list เก็บฟังก์ชันไว้ ใส่กลับใน list ได้ทุกเมื่อ)
-PAGES = [feeder_status, uptime, next_flight]
+PAGES = [feeder_status, uptime, next_flight, weather]
