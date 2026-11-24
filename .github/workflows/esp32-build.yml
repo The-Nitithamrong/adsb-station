@@ -1,0 +1,54 @@
+name: ESP32 panel firmware
+
+# firmware ของ watchdog-esp32-display/ (panel ไฟ + watchdog ตัดไฟ Pi) flash ด้วยมือจากเครื่องเจ้าของ — ไม่มี
+# autoupdate แบบฝั่ง Pi. ขั้นนี้จึงเป็นด่านเดียวก่อนถึงบอร์ด:
+#   sim   = รัน src/main.cpp ตัวจริงบน PC กับฮาร์ดแวร์ปลอม (ดู watchdog-esp32-display/sim/sim_main.cpp):
+#           Pi เงียบ 20 นาทีต้องยิง webhook ตัดไฟ 1 ครั้งพอดี, แตะปลุกจอต้องไม่สั่งไฟ, กดค้าง = 1 คำสั่ง ฯลฯ
+#   build = compile ด้วย PlatformIO toolchain จริง (config จาก config.h.example) — กันโค้ดที่ผ่าน g++ บน PC
+#           แต่ไม่ผ่าน Arduino core / TFT_eSPI จริง
+# รันเมื่อ watchdog-esp32-display/ เปลี่ยน หรือกดมือ.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "watchdog-esp32-display/**"
+      - ".github/workflows/esp32-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sim:
+    name: Host simulation (watchdog timing + panel behaviour)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests + scenarios
+        run: make -C watchdog-esp32-display/sim test
+
+  build:
+    name: PlatformIO build (cyd2usb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('watchdog-esp32-display/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      # config.h จริงไม่อยู่ใน git (มี WiFi pass + HA token) → build ด้วยตัวอย่าง: พิสูจน์ด้วยว่า example ยัง compile ได้
+      - name: Build
+        working-directory: watchdog-esp32-display
+        run: |
+          cp src/config.h.example src/config.h
+          pio run

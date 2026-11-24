@@ -1,23 +1,42 @@
 // config.h.example — คัดลอกเป็น src/config.h แล้วเติมค่า
-// (src/config.h ไม่ขึ้น repo — อยู่ใน .gitignore เพราะมี wifi pass + tuya local_key)
+// (src/config.h ไม่ขึ้น repo — อยู่ใน .gitignore เพราะมี wifi pass + HA token)
 #pragma once
 
-// --- WiFi (วงเดียวกับ Pi + ปลั๊ก Tuya) ---
+// --- WiFi (วงเดียวกับ Pi + HA) ---
 #define WIFI_SSID   "Arin II"
 #define WIFI_PASS   "<wifi password>"
 
-// --- Pi ที่จะเฝ้า ---
+// --- Home Assistant REST API (ปุ่มไฟในห้อง) ---
+// HA_BASE  = เครื่องที่รัน HA (Pi#2) — ไม่มี "/" ปิดท้าย
+// HA_TOKEN = long-lived access token: HA → รูปโปรไฟล์ (มุมซ้ายล่าง) → Security → Long-lived access tokens
+//            → Create token (โชว์ครั้งเดียว). token มีสิทธิ์เท่ากับ user ที่สร้าง → สร้างจาก user แยกที่
+//            "ไม่ใช่ admin" (Settings → People → Add person, ปิด Administrator) แล้ว login เป็น user นั้นไปสร้าง
+#define HA_BASE     "http://192.168.41.207:8123"
+#define HA_TOKEN    "<long-lived access token>"
+
+// ปุ่มบนจอ: {"ชื่อบนปุ่ม", "entity_id"} — 1 ถึง 6 ปุ่ม จอจัดตารางให้เอง (1 = เต็มจอ · 2 = 2x1 · 3–4 = 2x2 · 5–6 = 3x2)
+//   - ชื่อ: ตัวอักษรอังกฤษ/ตัวเลขเท่านั้น (font บนจอไม่มีภาษาไทย). ≤ 7 ตัวอักษรจะได้ตัวใหญ่ในตาราง 3x2
+//   - entity_id: ก๊อปของจริงจาก HA → Developer Tools → States (light.* หรือ switch.*) — ห้ามเดา:
+//     id ผิด ปุ่มจะขึ้น "NO ENTITY" (ส่วน automation ใน HA ที่ id ผิดจะเงียบไปเฉย ๆ — เคยเสียเวลากับเรื่องนี้มาแล้ว)
+//   ⚠️ ห้ามใส่ปลั๊กของ Pi (switch.pi_socket_1 ฯลฯ) หรือปลั๊กของเครื่องที่รัน HA ลงในนี้ — ปุ่มไฟกดทีเดียวติด/ดับทันที
+//      ไม่มีขั้นยืนยัน และไม่มีใครเปิดกลับให้ (ต่างจากปุ่ม RESET PI ที่ HA จับเวลาเปิดคืนเอง)
+#define LIGHTS_INIT { \
+  {"CEILING", "light.replace_me_1"}, \
+  {"LAMP",    "switch.replace_me_2"}, \
+}
+
+// --- Pi ที่จะเฝ้า (watchdog ยังทำงานเบื้องหลังตลอด ไม่ว่าจอโชว์หน้าไหน) ---
 #define PI_IP       "192.168.41.241"
 #define PI_PORT     22          // พอร์ตที่เช็ค liveness (22=SSH — เปิดเสมอถ้า network stack ของ Pi มีชีวิต)
-#define PI_INFO_PORT 8099       // พอร์ต adsb-uptime.service บน Pi — ดึง uptime จริงมาโชว์ (display-only)
+#define PI_INFO_PORT 8099       // adsb-uptime.service บน Pi — uptime, coffee, และพยากรณ์อากาศ (/weather) ของ screensaver
 
-// --- Home Assistant Webhook (คุมปลั๊กผ่าน HA — ไม่ต้องมี token/auth) ---
+// --- Home Assistant Webhook (ตัดไฟ Pi — ไม่ต้องมี token/auth, แยกจาก HA_TOKEN ข้างบนโดยตั้งใจ) ---
 // ยิง webhook เดียว → automation เดียวใน HA ทำ turn_off → delay OFF_SECONDS → turn_on ครบวงจร
 // (HA เป็นคนจับเวลา ปลั๊กเปิดกลับเองแม้ ESP32 หลุด WiFi หลังยิง)
-// ⚠️ ตอนทดสอบ (HA ยังบน ADS-B Pi) ให้ automation ตัด "ปลั๊กตัวอื่น" เท่านั้น ห้ามตัดปลั๊กของ Pi ที่รัน HA
-#define HA_WEBHOOK_CYCLE  "http://192.168.41.241:8123/api/webhook/xxxxxxxx"
+// ⚠️ HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด (ดู deploy/homeassistant/MIGRATE_HA_TO_PI2.md)
+#define HA_WEBHOOK_CYCLE  "http://192.168.41.207:8123/api/webhook/xxxxxxxx"
 
-// --- จูน ---
+// --- จูน: watchdog ---
 #define CHECK_MS        30000UL     // เช็ค Pi ทุกกี่ ms (30 วิ)
 // DOWN_MS = threshold ของ ESP32 (ชั้นที่ 3, backstop สุดท้าย). ต้อง "หลัง" peer-watchdog (Pi#2)
 // ลองครบ: L3 ตัดไฟที่ POWER_CYCLE_S=600s + รอ POST_POWER_WAIT_S=240s + Pi boot ~120s ≈ 16 นาที.
@@ -27,6 +46,10 @@
 #define COOLDOWN_MS     1500000UL   // หลัง cycle เว้นกี่ ms ก่อน auto-cycle ใหม่ (1500000 = 25 นาที)
 #define TCP_TIMEOUT_MS  4000        // timeout ต่อการเช็ค Pi 1 ครั้ง
 
+// --- จูน: panel ---
+#define IDLE_MS         45000UL     // ไม่แตะจอนานเท่านี้ → screensaver (แตะ 1 ครั้ง = กลับหน้าปุ่มไฟ ยังไม่สั่งไฟ)
+
 // --- ทดสอบ ---
-#define DRY_RUN         1           // 1 = ทดสอบ UI/ปุ่ม/countdown โดยไม่ยิง HA จริง
+#define DRY_RUN         1           // 1 = ทดสอบปุ่ม RESET PI/countdown โดยไม่ยิง webhook ตัดไฟจริง
                                     // ตั้ง 0 เมื่อใส่ HA_WEBHOOK_CYCLE แล้ว (ถึงจะตัด-เปิดไฟจริง)
+                                    // (มีผลกับการตัดไฟ Pi เท่านั้น — ปุ่มไฟในห้องสั่งจริงเสมอ)
