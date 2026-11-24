@@ -386,27 +386,55 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   PANEL is showing — each request blocks the single-threaded loop, so one short block at a time keeps touch
   responsive, and the screensaver sends HA nothing at all.
   FAILURES NAME THEMSELVES (never just "?" everywhere): `HA OFFLINE` (no response, retry 15 s) · `HA TOKEN?`
-  (401/403, retry 60 s — every bad attempt is logged by HA as a failed login) · `NO ENTITY` on the one button
-  whose entity_id is wrong (404) · red `ERROR` when a command was not accepted. On any HA-wide fault every
-  light becomes unknown rather than showing a state that can no longer be confirmed.
-  TOUCH IS EDGE-TRIGGERED: one press = one command however long the finger stays (the watchdog-only firmware
-  re-fired every 250 ms — harmless for a 2-tap RESET, a strobe for a light). The touch that wakes the
-  screensaver only wakes — it is never forwarded as a button press.
+  (401/403) · `NO ENTITY` on the one button whose entity_id is wrong (404) · red `ERROR` when a command was
+  not accepted. A light's state is shown as known only while it can be confirmed: every light goes to `?` on
+  any HA-wide fault, when WiFi drops, and on re-entering PANEL after more than 2×`LIGHT_REFRESH_MS` without
+  a read (i.e. after the screensaver) until the fresh read lands.
+  TOKEN LOCKOUT (`haAuthFailed`): a rejected token is retried ONCE after 60 s, then not used again until
+  the board restarts, and no command is sent while `HA TOKEN?` shows. The token is compiled in, so retrying
+  cannot heal it — but each attempt is a failed login from this IP, and if HA has IP banning enabled the
+  ban is per-IP and never expires, so it would take the tokenless power-cycle webhook down with it. That
+  is the one path by which the light feature could have killed the backstop; `sim badtoken` pins it at
+  exactly `HA_AUTH_MAX_FAILS`=2 failed logins per boot.
+  TOUCH = ONE PRESS, ONE COMMAND, and it took two attempts to get right. The watchdog-only firmware re-fired
+  every 250 ms (harmless for a 2-tap RESET, a strobe for a light). Rules now: a press needs `PRESS_SAMPLES`
+  consecutive "touched" reads; a release needs `RELEASE_SAMPLES` consecutive "not touched" reads AND
+  `RELEASE_MS`, timed from the FIRST not-touched read of the run; after entering PANEL no tap is accepted
+  until the glass has been continuously finger-free for `PANEL_QUIET_MS` (so the wake touch, a held finger
+  and a phone-style double-tap can never land on the button that appears under them).
+  GOTCHA: the first version timed the release from the LAST touched read. One loop pass blocked in HTTP
+  for longer than `RELEASE_MS` — every pass does right after waking, when all states are re-read — and a
+  single dropped pressure sample (XPT2046 `touched()` is one un-averaged read) counted as "released": the
+  finger that woke the screen then commanded the light under it. It passed the simulator because the touch
+  stub never dropped a sample and the fake HA answered inside one loop pass; an independent read of the
+  code found it. The stubs are now deliberately unreliable (dropped/ghost samples, 40–300 ms HA latency,
+  stalled responses) — a new stub that is cleaner than the hardware is where the next one will hide.
   GOTCHA (timeouts): `HTTPClient::setTimeout` is the READ timeout only. Without `setConnectTimeout` a dead
   host blocks for the TCP stack's default — and on this firmware a blocked loop = dead touchscreen. Every
   request sets both (`haPrep`, `piInfoTimeouts`), and the coffee poll is skipped while the Pi is known down.
   The watchdog-only firmware had neither and nobody noticed, because there was nothing to press.
+  GOTCHA (body reads): never `http.getString()` — bodies are read by `httpReadBody()` (bounded size, own
+  deadline). `getString` keeps reading until Content-Length is satisfied for as long as the connection stays
+  open, so a peer that sends headers and then freezes (a Pi hanging mid-response is exactly what this
+  watchdog exists for) could leave `loop()` blocked for good and the backstop silently dead — the Pixoo
+  PUSH HANG again, on the device meant to catch it. Whether the installed core really loops forever there
+  was not verified on hardware; the bounded read makes the question moot, and the sim's HTTPClient stub has
+  no `getString` at all, so reintroducing it fails the build. A 200 with an empty body counts as "HA did
+  not answer" (backoff), not as "state unknown".
   GOTCHA (token scope): creating the token from a non-admin HA user keeps it out of HA's *configuration*, but
   it can still control EVERY entity, the Pi's plug included — HA's admin flag does not scope entity control.
   So `LIGHTS_INIT` must never list the Pi's plug or the HA box's plug: a light button has no confirm step and
   nothing turns the plug back on.
   Weather = same forecast as the Pixoo WX page, fetched from the Pi's `:8099/weather` on the watchdog's own
   check (only when the Pi just answered, so it can never delay the liveness check). Icons are the Pixoo's 7×7
-  bitmaps scaled up, same colours — the two displays read as one system.
+  bitmaps scaled up, same colours — the two displays read as one system. A `wx1 0` reply never overwrites a
+  forecast the ESP32 already holds: `/run` is tmpfs, so the Pi answers `wx1 0` for ~2 min after every reboot
+  (weather timer `OnBootSec=2min`) — right after the outages this board exists for — and the cached copy is
+  still good until its own `ts` is 6 h old.
   `src/panel_logic.h` = the pure logic (HA state parser, weather parser, grid) with no Arduino dependency so
   it compiles and unit-tests on a PC. `sim/` runs the REAL `src/main.cpp` on a PC against stubbed
-  display/touch/WiFi/HTTP with a virtual clock (`make -C sim test`; `make -C sim shots` renders every page to
-  PNG). `.github/workflows/esp32-build.yml` runs that plus a real PlatformIO build on every change here —
+  display/touch/WiFi/HTTP with a virtual clock (`make -C sim test`: scenarios `watchdog`, `ui`, `touch`
+  at 5 HA latencies, `badtoken`, `stall`, `layout`; `make -C sim shots` renders every page to PNG). `.github/workflows/esp32-build.yml` runs that plus a real PlatformIO build on every change here —
   this firmware is flashed by hand (no autoupdate), so that is its only gate.
   PlatformIO build flags (no User_Setup.h); DRY_RUN=1 tests RESET PI without firing HA (lights always act for
   real). `src/config.h` gitignored (WiFi pass + HA token); an old watchdog-era config.h fails the build with a

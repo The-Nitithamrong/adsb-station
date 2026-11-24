@@ -5,6 +5,9 @@
 // 1 ครั้งพอดี แม้จอกำลังเป็น screensaver" หรือ "แตะปลุกจอต้องไม่ไปสั่งไฟ" ทดสอบบนบอร์ดจริงต้องนั่งรอเป็นชั่วโมง.
 // ที่นี่ 8 ชั่วโมงจำลองจบในไม่ถึงวินาที และไม่ต้องมีบอร์ด.
 //
+// stub ตั้งใจ "ไม่สมบูรณ์แบบ" เหมือนของจริง: sample ทัชหลุด/หลอนได้, HA ตอบช้ากว่า 1 loop ได้, ปลายทางค้างกลางคำตอบได้
+// (รุ่นแรกของ stub นิ่งเกินจริง และ bug แตะปลุกจอ → สั่งไฟ หลุดผ่านไปได้เพราะเหตุนั้น).
+//
 //   make test          → unit test + ทุก scenario (exit != 0 ถ้ามีข้อไหนไม่ผ่าน)
 //   make shots         → ภาพหน้าจอ PNG ทุกหน้า ลง build/shots/ (ต้องมี python3 + Pillow)
 #include <map>
@@ -19,7 +22,9 @@ unsigned long nowMs = 0;
 long long epochBase = 0;
 bool ntpOk = true;
 bool wifiOk = true, piAlive = true, piInfoUp = true, haUp = true, haTokenOk = true;
-bool touchDown = false; int touchRawX = 0, touchRawY = 0;
+bool touchDown = false; int touchRawX = 0, touchRawY = 0, dropSamples = 0, ghostSamples = 0;
+bool stallBody = false;                // ปลายทางส่ง header แล้วค้าง ไม่ส่ง body ไม่ปิด connection
+long haGetMs = 40, haPostMs = 150;     // เวลาที่ HA ใช้ตอบ (WiFi modem-sleep ของ ESP32 ทำให้ของจริงช้ากว่า LAN เปล่า ๆ)
 FILE* dl = nullptr;
 int coffee = 0;
 std::string weather = "wx1 0";
@@ -50,7 +55,7 @@ static int handle(const std::string& method, const std::string& url, const std::
   }
   if (url.compare(0, HA.size(), HA) == 0) {
     if (!haUp) return dead();
-    nowMs += 40;
+    nowMs += haGetMs;
     std::string p = url.substr(HA.size());
     if (p.compare(0, 13, "/api/webhook/") == 0) { if (method == "POST") webhooks++; return 200; }   // webhook ไม่ใช้ token
     auto a = hdr.find("Authorization");
@@ -69,7 +74,7 @@ static int handle(const std::string& method, const std::string& url, const std::
       if (q == std::string::npos) return 400;
       std::string id = body.substr(q + 13, body.find('"', q + 13) - q - 13);
       auto e = ents.find(id);
-      nowMs += 150;
+      nowMs += haPostMs;
       if (e != ents.end() && e->second.state != "unavailable") {
         std::string cur = e->second.pendingAt ? e->second.pending : e->second.state;
         std::string want = svc == "turn_on" ? "on" : svc == "turn_off" ? "off" : (cur == "on" ? "off" : "on");
@@ -93,9 +98,8 @@ int http(const std::string& method, const std::string& url, const std::map<std::
 
 SerialT Serial;
 WiFiT WiFi;
-static bool verbose = false;
-void simLog(const char* s) { if (verbose) printf("  [serial %lu] %s", sim::nowMs, s); }
-bool WiFiClient::connect(const char*, int, int timeoutMs) {
+void simLog(const char*) {}
+bool WiFiClient::connect(const char*, int, int timeoutMs) {   // ใช้โดย piAlive() เท่านั้น (TCP :22)
   if (sim::wifiOk && sim::piAlive) { sim::nowMs += 5; return true; }
   sim::nowMs += timeoutMs; return false;
 }
@@ -112,6 +116,9 @@ static void press(int x, int y) {
   sim::touchDown = true;
 }
 static void tap(int x, int y, unsigned long hold = 120) { press(x, y); runFor(hold); sim::touchDown = false; runFor(300); }
+// แตะลงแล้วเดิน loop จนแตะนั้นถูกนับ (PRESS_SAMPLES sample) — นิ้วยังค้างอยู่ตอนคืน ให้ผู้เรียกตรวจสถานะ "ทันทีหลังแตะ"
+static void pressNow(int x, int y) { press(x, y); for (int i = 0; i < PRESS_SAMPLES; i++) loop(); }
+static int authFails() { int n = 0; for (auto& r : sim::reqs) if (r.code == 401 || r.code == 403) n++; return n; }
 static void snap(const char* name) { fprintf(sim::dl, "S %s\n", name); }
 static int count(const char* method, const char* urlPart, unsigned long since = 0) {
   int n = 0;
@@ -125,6 +132,7 @@ static long long nowEpoch() { return sim::epochBase + sim::nowMs / 1000; }
 static PRect cell(int i) { return gridCell(N_LIGHTS, i); }
 static void tapLightBtn(int i, unsigned long hold = 120) { PRect r = cell(i); tap(r.x + r.w / 2, r.y + r.h / 2, hold); }
 static void tapHeader() { tap(100, 16); }          // แถบหัวหน้า PANEL: ไม่ใช่ปุ่ม — ใช้กันจอเข้า screensaver ระหว่างทดสอบ
+static void wake() { tap(100, 16); runFor(PANEL_QUIET_MS + 200); }   // ปลุกจอ แล้วรอให้พ้นช่วงที่หน้าปุ่มยังไม่รับแตะ
 
 static const char* WX_FULL = "wx1 %lld\nH TMD BKK 2026-11-24 partly 33 24 0.0 -\nH TMD BKK 2026-11-25 rain 31 24 5.2 -\n"
                              "H TMD BKK 2026-11-26 storm 30 25 22.4 -\nD OM TPE 2026-11-27 heavy 22 18 30.2 80";
@@ -171,7 +179,7 @@ static int scenarioUi() {
 
   // แตะ LAMP (ปิด → เปิด): สั่ง turn_on ครั้งเดียว, โชว์ทันที, ไม่กระพริบกลับระหว่างที่อุปกรณ์ยังรายงานค่าเก่า
   unsigned long t = sim::nowMs;
-  press(cell(1).x + 20, cell(1).y + 20); loop();
+  pressNow(cell(1).x + 20, cell(1).y + 20);
   EXPECT(lightState[1] == 1 && lightCmdPending[1]);
   sim::touchDown = false; runFor(300);
   snap("02_after_tap_lamp");
@@ -197,7 +205,7 @@ static int scenarioUi() {
   runFor(4000 - (sim::nowMs % 1000));
   EXPECT(lightState[0] == 0);
   sim::ents["light.l1"].state = "on"; t = sim::nowMs;
-  press(cell(0).x + 20, cell(0).y + 20); loop(); sim::touchDown = false;
+  pressNow(cell(0).x + 20, cell(0).y + 20); sim::touchDown = false;
   EXPECT(count("POST", "/homeassistant/turn_on", t) == 1 && count("POST", "/homeassistant/toggle", t) == 0);
   runFor(4000); EXPECT(lightState[0] == 1 && sim::ents["light.l1"].state == "on");
   say("stale display + tap = explicit turn_on (light stays on), not a blind toggle");
@@ -226,15 +234,14 @@ static int scenarioUi() {
   EXPECT(haFault == 0 && lightState[0] == 1);
   say("HA down -> 'HA OFFLINE', all '?', polite retry, failed command shown as failed; HA back -> recovers");
 
-  // token ผิด/ถูกเพิกถอน: ถามซ้ำช้า ๆ (ทุกครั้งที่ผิด HA จด login failed)
+  // HA ตอบ 401 หนึ่งครั้ง (เช่นจังหวะ HA เพิ่ง start) → บอก "HA TOKEN?", ไม่ส่งคำสั่งระหว่างนั้น, ลองใหม่ครั้งเดียวแล้วฟื้น
   sim::haTokenOk = false; runFor(8000); tapHeader();
-  EXPECT(haFault == 2);
+  EXPECT(haFault == 2 && !haAuthLatched && authFails() == 1);
   snap("05_panel_bad_token");
-  { unsigned long a = sim::nowMs; for (int k = 0; k < 12; k++) { runFor(10000); tapHeader(); }
-    int n = count("GET", "/api/states/", a); printf("  bad token: %d state requests in 2 min\n", n); EXPECT(n <= 3); }
+  t = sim::nowMs; tapLightBtn(0); EXPECT(count("POST", "/homeassistant/", t) == 0 && authFails() == 1);   // ไม่ยิง login ผิดเพิ่ม
   sim::haTokenOk = true; runFor(61000); tapHeader(); runFor(3000);
-  EXPECT(haFault == 0 && lightState[1] == 1);
-  say("401 -> 'HA TOKEN?', slow retry");
+  EXPECT(haFault == 0 && !haAuthLatched && haAuthFails == 0 && lightState[1] == 1);
+  say("one 401 -> 'HA TOKEN?', taps not sent meanwhile, single retry after 60 s recovers");
 
   // หน้า Pi: coffee, RESET ต้องแตะ 2 ครั้ง, แตะครั้งเดียวหมดเวลาเอง, ออกจากหน้า = ยกเลิก
   tap(250, 12); EXPECT(page == PAGE_PI);
@@ -269,6 +276,9 @@ static int scenarioUi() {
   wxFetched = false; runFor(31000); snap("11_saver_dest_beyond");
   setWx("wx1 %lld\nH TMD BKK 2026-11-24 cloudy 32 25 1.5 -\nH TMD BKK 2026-11-25 clear 33 24 0.0 -\nH TMD BKK 2026-11-26 partly 33 24 0.0 -", nowEpoch());
   wxFetched = false; runFor(31000); snap("12_saver_no_flight");
+  // Pi reboot: /run ว่าง → endpoint ตอบ "wx1 0" อยู่ ~2 นาที — ชุดที่ถืออยู่ (ยังไม่เก่า) ต้องไม่ถูกทับด้วย "ไม่มี"
+  { long keep = wx.ts; sim::weather = "wx1 0"; wxFetched = false; runFor(61000);
+    EXPECT(wx.ts == keep && wx.nHome == 3 && !wxFetched); }
   sim::piInfoUp = false; runFor(7 * 3600000UL);     // endpoint หาย 7 ชม. → ข้อมูลเก่าเกิน 6 ชม. = ไม่โชว์ (และข้ามเที่ยงคืนไปด้วย)
   snap("13_saver_stale"); EXPECT(page == PAGE_SAVER);
   sim::piInfoUp = true; setWx(WX_FULL, nowEpoch()); runFor(31000);
@@ -278,8 +288,8 @@ static int scenarioUi() {
   say("screensaver variants rendered; past midnight it picks the next day's row");
 
   // reset มือจากหน้า Pi
-  tap(10, 10); tap(250, 12); EXPECT(page == PAGE_PI);
-  tap(160, 195); press(160, 195); loop();           // แตะครั้งที่ 2 ภายใน 3 วิ → เริ่มตัดไฟ (block ~62 วิ)
+  wake(); tap(250, 12); EXPECT(page == PAGE_PI);
+  tap(160, 195); pressNow(160, 195);                // แตะครั้งที่ 2 ภายใน 3 วิ → เริ่มตัดไฟ (block ~62 วิ)
   sim::touchDown = false;
   EXPECT(sim::webhooks == 1 && page == PAGE_PI);
   runFor(1500); snap("15_pi_after_manual_reset");
@@ -291,7 +301,7 @@ static int scenarioUi() {
   sim::piAlive = false; unsigned long down = sim::nowMs; int wh = sim::webhooks;
   runFor(12 * 60000UL + 31000); snap("16_saver_pi_down"); EXPECT(!piUp && sim::webhooks == wh);
   // ระหว่าง Pi ดับ ปุ่มไฟต้องยังใช้ได้ และ 1 loop ต้องไม่ค้างเกิน timeout ที่ตั้งไว้ (เช็ค Pi 4 วิ)
-  tap(10, 10); t = sim::nowMs; tapLightBtn(1); EXPECT(count("POST", "/homeassistant/turn_off", t) == 1);
+  wake(); runFor(1500); t = sim::nowMs; tapLightBtn(1, 400); EXPECT(count("POST", "/homeassistant/turn_off", t) == 1);
   { unsigned long worst = 0; for (int k = 0; k < 4000; k++) { unsigned long a = sim::nowMs; loop(); if (sim::nowMs - a > worst) worst = sim::nowMs - a; }
     printf("  Pi down: longest single loop() = %lu ms\n", worst); EXPECT(worst <= TCP_TIMEOUT_MS + 500); }
   while (sim::webhooks == wh && sim::nowMs - down < 25 * 60000UL) runFor(100);
@@ -304,12 +314,140 @@ static int scenarioUi() {
   return fails;
 }
 
+// ===== touch: จอ resistive จริงไม่นิ่ง + HA ตอบช้ากว่า 1 loop — "1 แตะ = 1 คำสั่ง" ต้องยังจริง =====
+// L = เวลาที่ HA ใช้ตอบ GET (ms). ทุกข้อรันซ้ำโดยเลื่อนตำแหน่ง sample ที่หลุดไปทีละ loop: bug ประเภทนี้ขึ้นกับจังหวะ
+// (รุ่นแรกผ่านที่ 40 ms แต่ที่ 60 ms ขึ้นไป แตะปลุกจอค้าง 0.6 วิ + sample หลุด 1 ตัว = ไฟถูกสั่ง).
+static int scenarioTouch(long L) {
+  sim::haGetMs = L;
+  sim::ents["switch.l4"].state = "off";
+  setup(); runFor(1500);
+  int cmds;
+
+  // A) แตะปลุกจอ "ตรงตำแหน่งปุ่มไฟ" ค้าง 0.8 วิ, มี sample หลุดกลางคัน 1–2 ตัว → ต้องไม่มีคำสั่ง
+  for (int drops = 1; drops <= 2; drops++)
+    for (int k = 0; k <= 24; k++) {
+      runFor(47000); EXPECT(page == PAGE_SAVER);
+      unsigned long t = sim::nowMs; PRect r = cell(k % N_LIGHTS);
+      pressNow(r.x + r.w / 2, r.y + r.h / 2); EXPECT(page == PAGE_PANEL);
+      for (int i = 0; i < k && sim::nowMs - t < 800; i++) loop();
+      sim::dropSamples = drops;
+      while (sim::nowMs - t < 800) loop();
+      sim::touchDown = false; sim::dropSamples = 0; runFor(700);
+      cmds = count("POST", "/homeassistant/", t);
+      if (cmds) printf("  A: GET %ld ms, %d dropped sample(s) after %d loops -> %d command(s)\n", L, drops, k, cmds);
+      EXPECT(cmds == 0);
+    }
+
+  // A2) นิ้วปลุกจอที่ "สั่น" ตลอดเวลาที่ค้าง (หลุด 3 sample ทุก ๆ 2 sample ที่ติด) นาน 3 วิ → ยังต้องไม่มีคำสั่ง
+  { runFor(47000); EXPECT(page == PAGE_SAVER);
+    unsigned long t = sim::nowMs; PRect r = cell(0);
+    pressNow(r.x + r.w / 2, r.y + r.h / 2); EXPECT(page == PAGE_PANEL);
+    while (sim::nowMs - t < 3000) { loop(); loop(); sim::dropSamples = 3; loop(); loop(); loop(); }
+    sim::touchDown = false; sim::dropSamples = 0; runFor(700);
+    cmds = count("POST", "/homeassistant/", t);
+    if (cmds) printf("  A2: GET %ld ms, flickering wake finger -> %d command(s)\n", L, cmds);
+    EXPECT(cmds == 0); }
+
+  // B) แตะปุ่มไฟตั้งใจ ค้าง 1.5 วิ, sample หลุดหลังคำสั่งกลับมา → 1 คำสั่งพอดี
+  for (int k = 0; k <= 24; k++) {
+    runFor(1500); wake(); runFor(L * N_LIGHTS + 500);
+    unsigned long t = sim::nowMs; PRect r = cell(1);
+    pressNow(r.x + r.w / 2, r.y + r.h / 2);
+    for (int i = 0; i < k && sim::nowMs - t < 1500; i++) loop();
+    sim::dropSamples = 1 + (k & 1);
+    while (sim::nowMs - t < 1500) loop();
+    sim::touchDown = false; sim::dropSamples = 0; runFor(3000);
+    cmds = count("POST", "/homeassistant/", t);
+    if (cmds != 1) printf("  B: GET %ld ms, drop after %d loops -> %d command(s)\n", L, k, cmds);
+    EXPECT(cmds == 1);
+  }
+
+  // C) ปุ่ม "< LIGHTS" ของหน้า PI อยู่ทับตำแหน่งปุ่มไฟดวงแรก → กดค้างแล้วต้องไม่ไปสั่งไฟ
+  for (int k = 0; k <= 12; k++) {
+    runFor(1500); wake(); tap(250, 12); EXPECT(page == PAGE_PI);
+    unsigned long t = sim::nowMs;
+    pressNow(BACK_BTN.x + 50, BACK_BTN.y + 20); EXPECT(page == PAGE_PANEL);
+    for (int i = 0; i < k && sim::nowMs - t < 800; i++) loop();
+    sim::dropSamples = 1 + (k & 1);
+    while (sim::nowMs - t < 800) loop();
+    sim::touchDown = false; sim::dropSamples = 0; runFor(700);
+    EXPECT(count("POST", "/homeassistant/", t) == 0);
+  }
+
+  // D) double-tap ปลุกจอ (นิสัยจากมือถือ) ตรงตำแหน่งปุ่มไฟ → ครั้งที่ 2 ต้องไม่กลายเป็นคำสั่ง
+  for (unsigned long gap = 60; gap <= 240; gap += 60) {
+    runFor(47000); EXPECT(page == PAGE_SAVER);
+    unsigned long t = sim::nowMs; PRect r = cell(0);
+    press(r.x + r.w / 2, r.y + r.h / 2); runFor(90); sim::touchDown = false; runFor(gap);
+    press(r.x + r.w / 2, r.y + r.h / 2); runFor(90); sim::touchDown = false; runFor(800);
+    EXPECT(page == PAGE_PANEL && count("POST", "/homeassistant/", t) == 0);
+  }
+
+  // E) sample "แตะ" หลอนเดี่ยว ๆ (ไม่มีนิ้ว): บนหน้าปุ่ม → ไม่มีคำสั่ง · บนหน้าพัก → ไม่ปลุกจอ
+  { runFor(1500); wake(); runFor(L * N_LIGHTS + 500);
+    unsigned long t = sim::nowMs; PRect r = cell(2);
+    for (int i = 0; i < 20; i++) { press(r.x + 10, r.y + 10); sim::touchDown = false; sim::ghostSamples = 1; runFor(700); }
+    EXPECT(count("POST", "/homeassistant/", t) == 0);
+    runFor(47000); EXPECT(page == PAGE_SAVER);
+    sim::ghostSamples = 1; runFor(1000); EXPECT(page == PAGE_SAVER); }
+
+  // F) ระหว่างพักจอ มีคนปิด CEILING ที่ผนัง. ปลุกจอ: ต้องไม่โชว์ค่าก่อนพักเป็นค่าจริง, อ่านใหม่, แล้วแตะ = สั่งถูกทิศ
+  { sim::ents["light.l1"].state = "on"; runFor(1500); wake(); runFor(L * N_LIGHTS + 3000); EXPECT(lightState[0] == 1);
+    runFor(47000); EXPECT(page == PAGE_SAVER);
+    sim::ents["light.l1"].state = "off";
+    PRect r = cell(0);
+    pressNow(r.x + 20, r.y + 20);                       // แตะปลุก
+    EXPECT(page == PAGE_PANEL && lightState[N_LIGHTS - 1] != 1);   // ดวงที่ยังไม่ถูกอ่านใหม่ ต้องยังไม่โชว์ว่ารู้
+    sim::touchDown = false; runFor(PANEL_QUIET_MS + L * N_LIGHTS + 300);
+    EXPECT(lightState[0] == 0);
+    unsigned long t = sim::nowMs; tapLightBtn(0);
+    EXPECT(count("POST", "/homeassistant/turn_on", t) == 1 && count("POST", "/homeassistant/", t) == 1); }
+  return fails;
+}
+
+// ===== badtoken: token ผิดตั้งแต่เปิดเครื่อง → login ล้มเหลวได้ไม่เกิน HA_AUTH_MAX_FAILS ครั้ง แล้วเลิกใช้ token =====
+// (ถ้า HA เปิด ip_ban ไว้ login ล้มเหลวซ้ำ ๆ = IP โดนแบน ซึ่งจะพา webhook ตัดไฟ Pi ไปด้วย) — และ backstop ต้องยังยิงได้
+static int scenarioBadToken() {
+  sim::haTokenOk = false;
+  setup();
+  for (int k = 0; k < 72; k++) { runFor(48000); wake(); tapLightBtn(k % N_LIGHTS); }   // ใช้งานจริงจัง 1 ชม.
+  printf("  1 h of use with a rejected token: %d failed logins, latched=%d\n", authFails(), haAuthLatched);
+  EXPECT(authFails() == HA_AUTH_MAX_FAILS && haAuthLatched && haFault == 2);
+  sim::haTokenOk = true;                             // แก้ฝั่ง HA แล้ว — firmware ยังไม่ลองเองจนกว่าจะ restart (ตั้งใจ)
+  unsigned long t = sim::nowMs; for (int k = 0; k < 10; k++) { runFor(48000); wake(); tapLightBtn(0); }
+  EXPECT(count("GET", "/api/states/", t) == 0 && count("POST", "/homeassistant/", t) == 0);
+  sim::piAlive = false; int wh = sim::webhooks; runFor(22 * 60000UL);
+  EXPECT(sim::webhooks == wh + 1);
+  printf("  Pi silent 22 min with the token locked out: %d power-cycle webhook(s)\n", sim::webhooks - wh);
+  return fails;
+}
+
+// ===== stall: ปลายทางส่ง header แล้วค้าง (ไม่ส่ง body, ไม่ปิด connection) — ทั้ง Pi endpoint และ HA =====
+// loop() ต้องกลับมาเสมอ (มีเส้นตาย) และ watchdog ต้องยังเดิน: นี่คืออาการของ Pi ที่แฮงก์กลางคำตอบพอดี
+static int scenarioStall() {
+  setup(); runFor(40000);
+  sim::stallBody = true;
+  time_t before = lastCheckEpoch; unsigned long worst = 0, end = sim::nowMs + 5 * 60000UL; int k = 0;
+  while (sim::nowMs < end) {
+    if (++k % 1500 == 0) { press(100, 16); }         // แตะแถบหัวเป็นระยะ ให้จออยู่หน้าปุ่ม (มีการถาม HA)
+    else if (k % 1500 == 8) sim::touchDown = false;
+    unsigned long a = sim::nowMs; loop(); if (sim::nowMs - a > worst) worst = sim::nowMs - a;
+  }
+  printf("  stalled bodies for 5 min: longest single loop() = %lu ms, Pi checks kept running = %s\n",
+         worst, lastCheckEpoch > before + 200 ? "yes" : "NO");
+  EXPECT(worst <= 3UL * TCP_TIMEOUT_MS + HA_TIMEOUT_MS + 1000 && lastCheckEpoch > before + 200);
+  EXPECT(piUpSecs == -1 && haFault == 1);            // ไม่ได้ค่ามาก็บอกว่าไม่รู้ ไม่เดา
+  sim::piAlive = false; int wh = sim::webhooks; runFor(22 * 60000UL);
+  EXPECT(sim::webhooks == wh + 1);
+  return fails;
+}
+
 int main(int argc, char** argv) {
   setenv("TZ", "<+07>-7", 1); tzset();
   const char* scenario = argc > 1 ? argv[1] : "ui";
   sim::dl = fopen(argc > 2 ? argv[2] : "/dev/null", "w");
   if (!sim::dl) { perror("display list"); return 2; }
-  verbose = argc > 3;
+  long param = argc > 3 ? atol(argv[3]) : 0;
   sim::epochBase = 1795523400;                      // อังคาร 2026-11-24 19:30:00 +07
   sim::ents["light.l1"].state = "on";
   sim::ents["switch.l2"].state = "off";
@@ -318,8 +456,14 @@ int main(int argc, char** argv) {
   sim::ents["light.l5"].state = "on";
   sim::ents["light.l6"].state = "off";
 
-  int rc = !strcmp(scenario, "watchdog") ? scenarioWatchdog() : !strcmp(scenario, "layout") ? scenarioLayout() : scenarioUi();
+  int rc = !strcmp(scenario, "watchdog") ? scenarioWatchdog()
+         : !strcmp(scenario, "layout")   ? scenarioLayout()
+         : !strcmp(scenario, "touch")    ? scenarioTouch(param)
+         : !strcmp(scenario, "badtoken") ? scenarioBadToken()
+         : !strcmp(scenario, "stall")    ? scenarioStall()
+         : scenarioUi();
   fclose(sim::dl);
-  printf("%s (%d lights): %s\n", scenario, N_LIGHTS, rc ? "FAILED" : "ok");
+  if (param) printf("%s %ld (%d lights): %s\n", scenario, param, N_LIGHTS, rc ? "FAILED" : "ok");
+  else       printf("%s (%d lights): %s\n", scenario, N_LIGHTS, rc ? "FAILED" : "ok");
   return rc ? 1 : 0;
 }

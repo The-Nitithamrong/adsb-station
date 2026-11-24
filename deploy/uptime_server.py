@@ -90,7 +90,9 @@ def weather_text(path=WX_FILE):
             # ไม่มีพยากรณ์ของวันที่บินถึง (ไกลเกิน/ดึงไม่ได้) → ส่งแค่ชื่อเมือง+วันที่ ค่าที่เหลือ '-' ไม่เดา
             lines.append(_wx_line("D", dest.get("src"), dest.get("label"), hit or {"date": dest.get("date")}))
         return "\n".join(lines)
-    except (OSError, ValueError, AttributeError, TypeError, OverflowError):
+    except Exception:
+        # ไฟล์หาย / JSON พัง / โครงสร้างไม่ใช่ที่คาด (เช่น days เป็น dict) — ทุกแบบแปลว่า "ไม่มีข้อมูลที่ใช้ได้".
+        # จับกว้างโดยตั้งใจ: route นี้มีไว้โชว์อย่างเดียว และ ESP32 เก็บชุดเดิมไว้เมื่อได้ "wx1 0" (ไม่เอาไปทับ)
         return "wx1 0"
 
 

@@ -11,6 +11,9 @@ test: build/test_logic build/sim $(LAYOUTS:%=build/sim_n%)
 	build/test_logic
 	build/sim watchdog
 	build/sim ui build/ui.dl
+	for ms in 40 60 100 150 300; do build/sim touch /dev/null $$ms || exit 1; done
+	build/sim badtoken
+	build/sim stall
 	for n in $(LAYOUTS); do build/sim_n$$n layout build/layout$$n.dl || exit 1; done
 
 shots: test

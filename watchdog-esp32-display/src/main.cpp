@@ -4,7 +4,8 @@
 // จอมี 3 หน้า:
 //   PANEL — ปุ่มไฟ 1–6 ปุ่ม (LIGHTS_INIT ใน config.h) สั่ง + อ่านสถานะจริงผ่าน HA REST API (ha_switch.h)
 //   SAVER — screensaver: นาฬิกา + พยากรณ์อากาศชุดเดียวกับหน้า WX ของ Pixoo (Pi → :8099/weather).
-//           ขึ้นเองเมื่อไม่แตะจอ IDLE_MS. แตะ 1 ครั้ง = กลับ PANEL เฉย ๆ (ยังไม่สั่งไฟ — กันแตะปลุกจอแล้วไฟดับ)
+//           ขึ้นเองเมื่อไม่แตะจอ IDLE_MS. แตะ 1 ครั้ง = กลับ PANEL เฉย ๆ (ยังไม่สั่งไฟ — กันแตะปลุกจอแล้วไฟดับ);
+//           ปุ่มไฟเริ่มรับแตะหลังยกนิ้วนั้นออกไปแล้ว ~0.4 วิ และโชว์ "?" จนกว่าจะอ่านสถานะจริงใหม่
 //   PI    — หน้า watchdog เดิม: Pi OK/DOWN, uptime, ปุ่ม RESET PI (ยืนยัน 2 ครั้ง), ปุ่ม COFFEE.
 //           เข้าจากมุมขวาบนของ PANEL
 //
@@ -70,7 +71,10 @@
 #define HA_BACKOFF_MS      15000UL   // HA ไม่ตอบ → พักถามนานเท่านี้ (ทุกครั้งที่ถามแล้วไม่ตอบ จอทัชนิ่งไป HA_TIMEOUT_MS)
 #endif
 #ifndef HA_AUTH_BACKOFF_MS
-#define HA_AUTH_BACKOFF_MS 60000UL   // token ผิด (401/403) → ถามซ้ำช้า ๆ: ทุกครั้งที่ผิด HA จด "login failed" ไว้
+#define HA_AUTH_BACKOFF_MS 60000UL   // token ไม่ผ่าน (401/403) ครั้งแรก → รอเท่านี้แล้วลองอีก "ครั้งเดียว"
+#endif
+#ifndef HA_AUTH_MAX_FAILS
+#define HA_AUTH_MAX_FAILS  2         // ไม่ผ่านติดกันเท่านี้ครั้ง → เลิกใช้ token จนกว่าจะ restart (ดู haAuthFailed)
 #endif
 #ifndef WX_FETCH_MS
 #define WX_FETCH_MS        600000UL  // ดึงพยากรณ์จาก Pi ทุก 10 นาที (Pi เองอัปเดตชั่วโมงละครั้ง)
@@ -93,8 +97,16 @@
 #define TOUCH_Y_MIN 505
 #define TOUCH_Y_MAX 3465
 
-#define TAP_GAP_MS  250          // เว้นขั้นต่ำระหว่าง 2 แตะ (debounce เดิม)
-#define RELEASE_MS  80           // ต้องยกนิ้วนานเท่านี้ถึงนับเป็นแตะครั้งใหม่
+#define TAP_GAP_MS      250      // เว้นขั้นต่ำหลังคำสั่งก่อนหน้า "ทำเสร็จ" ก่อนรับแตะใหม่
+#define PRESS_SAMPLES   2        // อ่านได้ "แตะ" ติดกันกี่ sample ถึงนับเป็นแตะ (กัน sample หลอนครั้งเดียว)
+// "ยกนิ้วแล้ว" = อ่านได้ "ไม่แตะ" ติดกันครบทั้งจำนวน sample และครบทั้งเวลา. ต้องมีทั้งคู่: loop รอบที่ค้างรอ HTTP
+// ทำให้เวลาผ่านไปเป็นวินาทีโดยไม่ได้อ่านจอเลย (เวลาอย่างเดียวจึงหลอกได้) และ loop ที่เร็วทำให้ 3 sample กินแค่ 60 ms
+#define RELEASE_SAMPLES 3
+#define RELEASE_MS      80
+// เพิ่งเข้าหน้าปุ่มไฟ: ยังไม่รับแตะ จนกว่าจอจะ "ว่างนิ้ว" ต่อเนื่องครบเท่านี้ — นิ้วที่ใช้ปลุกจอ/กดปุ่มกลับ ต้องจากไปจริง ๆ
+// ก่อน และ double-tap ปลุกจอ (นิสัยจากมือถือ) ครั้งที่ 2 จะไม่กลายเป็นการกดปุ่มไฟที่บังเอิญอยู่ใต้นิ้ว
+#define PANEL_QUIET_SAMPLES 4
+#define PANEL_QUIET_MS      400
 
 static const int16_t SCREEN_W = 320;   // landscape (rotation 1)
 static const int16_t SCREEN_H = 240;
@@ -157,7 +169,9 @@ char dLine[64] = {0}, dLine2[64] = {0};   // หน้า PI: dLine = บรร�
 int page = PAGE_PANEL;
 unsigned long lastActivity = 0;           // แตะจอครั้งล่าสุด → ครบ IDLE_MS ไป screensaver
 bool touchHeld = false;                   // นิ้วยังค้างอยู่จากแตะที่นับไปแล้ว (1 แตะ = 1 คำสั่ง ไม่ว่ากดค้างนานแค่ไหน)
-unsigned long lastTouchSeen = 0, lastTapMs = 0;
+bool panelWait = true;                    // หน้าปุ่มไฟยังไม่รับแตะ (รอจอว่างนิ้วครบ PANEL_QUIET_*)
+int pressCount = 0, quietCount = 0;       // จำนวน sample "แตะ" / "ไม่แตะ" ที่อ่านได้ติดกัน
+unsigned long quietSince = 0, lastTapMs = 0;
 int16_t rawX = 0, rawY = 0;               // ค่าดิบของแตะล่าสุด (พิมพ์ลง Serial ไว้ใช้ calibrate)
 
 // เวลาจริง (epoch) ของการเช็ค Pi รอบล่าสุด — โชว์ "last check HH:MM:SS" อัปเดตทุก CHECK_MS (30 วิ)
@@ -179,6 +193,9 @@ unsigned long lastLightPoll = 0;
 int haFault = 0, dHaFault = -1;
 bool haBackoff = false;
 unsigned long haFailAt = 0, haBackoffMs = 0;
+int haAuthFails = 0;              // 401/403 ติดกันกี่ครั้งแล้ว
+bool haAuthLatched = false;       // true = เลิกใช้ token จนกว่าจะ restart
+unsigned long lastLightRead = 0;  // millis ที่อ่านสถานะไฟสำเร็จล่าสุด (ดวงไหนก็ได้) — ตัดสินว่าค่าที่ถืออยู่ยังเชื่อได้ไหม
 
 // --- พยากรณ์ ---
 WxData wx;                        // ชุดล่าสุดที่ดึงได้ (ts = 0 → ไม่มี)
@@ -219,7 +236,9 @@ long piUptimeS() {
   snprintf(url, sizeof(url), "http://%s:%d/", PI_IP, PI_INFO_PORT);
   if (!http.begin(url)) return -1;
   piInfoTimeouts(http);
-  long s = (http.GET() == 200) ? http.getString().toInt() : -1;
+  char body[24];
+  long s = -1;
+  if (http.GET() == 200 && httpReadBody(http, body, sizeof(body), TCP_TIMEOUT_MS) > 0) s = atol(body);
   http.end();
   return s;
 }
@@ -231,7 +250,9 @@ int coffeeGet(const char* path) {
   snprintf(url, sizeof(url), "http://%s:%d%s", PI_IP, PI_INFO_PORT, path);
   if (!http.begin(url)) return -1;
   piInfoTimeouts(http);
-  int r = (http.GET() == 200) ? http.getString().toInt() : -1;
+  char body[24];
+  int r = -1;
+  if (http.GET() == 200 && httpReadBody(http, body, sizeof(body), TCP_TIMEOUT_MS) > 0) r = atoi(body);
   http.end();
   return r;
 }
@@ -246,8 +267,12 @@ bool fetchWeather() {
   piInfoTimeouts(http);
   bool ok = false;
   if (http.GET() == 200) {
+    char body[640];                                  // เต็มที่ ~6 บรรทัด x ~50 ตัวอักษร
     WxData w;
-    if (wxParse(http.getString().c_str(), &w)) { wx = w; ok = true; }
+    httpReadBody(http, body, sizeof(body), TCP_TIMEOUT_MS);
+    // "wx1 0" = Pi ยังไม่มีไฟล์พยากรณ์ — เกิดทุกครั้งหลัง Pi reboot (/run เป็น tmpfs, weather timer รอ 2 นาที).
+    // ถ้าเราถือชุดที่ยังใช้ได้อยู่ อย่าเอา "ไม่มี" มาทับ: นับเป็นดึงไม่สำเร็จ → ลองใหม่รอบเช็คหน้า
+    if (wxParse(body, &w) && !(w.ts == 0 && wx.ts > 0)) { wx = w; ok = true; }
   }
   http.end();
   return ok;
@@ -349,17 +374,33 @@ void drawPanelDynamic() {  // วาดเฉพาะส่วนที่เ�
   forceUI = false;
 }
 
-// HA ไม่ตอบ / token ไม่ผ่าน → ทุกดวงกลายเป็น "ไม่รู้" (ไม่โชว์ค่าเก่าเป็นค่าจริง) + พักถาม
+// สถานะไฟที่ถืออยู่ยืนยันไม่ได้แล้ว → ทุกดวงเป็น "ไม่รู้" (ไม่โชว์ค่าเก่าเป็นค่าจริง)
+void forgetLights() {
+  for (int i = 0; i < N_LIGHTS; i++) { lightState[i] = -1; lightCode[i] = 0; lightCmdPending[i] = false; }
+}
+
+// HA ไม่ตอบ / token ไม่ผ่าน → ลืมสถานะ + พักถาม
 void haFailed(int fault) {
   haFault = fault;
   haBackoff = true;
   haFailAt = millis();
   haBackoffMs = (fault == 2) ? HA_AUTH_BACKOFF_MS : HA_BACKOFF_MS;
-  for (int i = 0; i < N_LIGHTS; i++) { lightState[i] = -1; lightCode[i] = 0; lightCmdPending[i] = false; }
+  forgetLights();
+}
+
+// HA ตอบ 401/403. ลองอีกครั้งเดียวหลัง HA_AUTH_BACKOFF_MS (เผื่อเป็นจังหวะ HA เพิ่ง start) แล้ว "เลิกใช้ token จนกว่าจะ
+// restart": token ฝังมากับ firmware — ถามซ้ำกี่รอบก็ไม่หาย แต่ทุกครั้งที่ผิด HA นับเป็น login ล้มเหลวจาก IP นี้ และ
+// ถ้า HA เปิด IP banning ไว้ ("Enable IP banning" + "Login attempts before ban" ของ HTTP integration —
+// https://www.home-assistant.io/integrations/http/) HA จะแบนทั้ง IP แบบไม่หมดอายุ — ซึ่งรวม webhook ตัดไฟ Pi ที่ไม่ได้
+// ใช้ token ด้วย. ปุ่มไฟเสียได้ แต่ต้องไม่ลาก backstop ไปด้วย → จำกัดไว้ HA_AUTH_MAX_FAILS ครั้งต่อการเปิดเครื่อง.
+void haAuthFailed() {
+  if (++haAuthFails >= HA_AUTH_MAX_FAILS) haAuthLatched = true;
+  haFailed(2);
 }
 
 // อ่านสถานะไฟ "ทีละดวง" ต่อ 1 loop (เวียนไป) — แต่ละครั้ง block สั้น ๆ จอทัชจึงยังตอบสนองระหว่างรอบ
 void pollLights() {
+  if (haAuthLatched) return;
   unsigned long now = millis();
   if (haBackoff) {
     if (now - haFailAt < haBackoffMs) return;
@@ -379,10 +420,12 @@ void pollLights() {
   }
   int code = 0;
   int s = haState(HA_BASE, HA_TOKEN, LIGHTS[i].entity, HA_TIMEOUT_MS, &code);
-  if (code <= 0)                      haFailed(1);
-  else if (code == 401 || code == 403) haFailed(2);
+  if (code <= 0)                       haFailed(1);
+  else if (code == 401 || code == 403) haAuthFailed();
   else {
     haFault = 0;
+    haAuthFails = 0;
+    lastLightRead = millis();
     if (lightCode[i] != code) lightDrawn[i] = VIS_NONE;   // "?" ↔ "NO ENTITY" ใช้ VIS เดียวกัน → บังคับวาดใหม่
     lightCode[i] = code;
     lightState[i] = s;
@@ -392,17 +435,23 @@ void pollLights() {
 
 void tapLight(int i) {
   int8_t cur = lightState[i];
-  drawLightBtn(i, VIS_PENDING);
-  // รู้สถานะ → สั่งแบบระบุปลายทาง (เปิด/ปิด) ตามที่จอโชว์ · ไม่รู้ → toggle (ดูเหตุผลที่ haToggle)
-  bool ok = (cur == 1) ? haSwitch(HA_BASE, HA_TOKEN, LIGHTS[i].entity, false, HA_CMD_TIMEOUT_MS)
-          : (cur == 0) ? haSwitch(HA_BASE, HA_TOKEN, LIGHTS[i].entity, true,  HA_CMD_TIMEOUT_MS)
-                       : haToggle(HA_BASE, HA_TOKEN, LIGHTS[i].entity, HA_CMD_TIMEOUT_MS);
+  bool ok = false;
+  if (haFault != 2) {                            // token ไม่ผ่านอยู่ → ไม่ส่ง (ส่งไปก็ได้แค่ login ล้มเหลวเพิ่มอีกครั้ง)
+    drawLightBtn(i, VIS_PENDING);
+    int code = 0;
+    // รู้สถานะ → สั่งแบบระบุปลายทาง (เปิด/ปิด) ตามที่จอโชว์ · ไม่รู้ → toggle (ดูเหตุผลที่ haToggle)
+    ok = (cur == 1) ? haSwitch(HA_BASE, HA_TOKEN, LIGHTS[i].entity, false, HA_CMD_TIMEOUT_MS, &code)
+       : (cur == 0) ? haSwitch(HA_BASE, HA_TOKEN, LIGHTS[i].entity, true,  HA_CMD_TIMEOUT_MS, &code)
+                    : haToggle(HA_BASE, HA_TOKEN, LIGHTS[i].entity, HA_CMD_TIMEOUT_MS, &code);
+    if (code == 401 || code == 403) haAuthFailed();
+  }
   if (ok) {
     if (cur >= 0) lightState[i] = cur ? 0 : 1;   // โชว์ค่าที่สั่งไปก่อน แล้วให้รอบอ่านถัดไปยืนยัน/แก้
     lightCmdPending[i] = true;
     lightCmdAt[i] = millis();
     haFault = 0;
     haBackoff = false;
+    haAuthFails = 0;
   } else {
     drawLightBtn(i, VIS_ERROR);                  // สั่งไม่สำเร็จ → บอกตรง ๆ ไม่ทำเป็นว่าเปลี่ยนแล้ว
     delay(900);
@@ -743,7 +792,11 @@ void gotoPage(int p) {
   if (p == PAGE_PANEL) {                 // เข้าหน้าไฟ → อ่านสถานะจริงใหม่ทุกดวงทันที (ระหว่างพักจอไม่ได้ถาม HA เลย)
     pollIdx = 0;
     pollBurst = N_LIGHTS;
+    panelWait = true;
     if (haBackoff && haFault == 1) haBackoff = false;   // คนเพิ่งแตะจอ → ลอง HA ใหม่เลย ไม่รอครบ backoff
+    // ค่าที่ถือมาจากก่อนพักจอ (อาจเป็นชั่วโมง) ยืนยันไม่ได้ → โชว์ "?" จนกว่าจะอ่านใหม่ ดีกว่าโชว์ค่าเก่าเป็นค่าจริง
+    // แล้วคนกดตามนั้น. เพิ่งอ่านมาไม่กี่วินาที (เช่นแวะหน้า PI แล้วกลับ) ถือว่ายังใช้ได้ ไม่ต้องกระพริบ.
+    if (millis() - lastLightRead > 2 * LIGHT_REFRESH_MS) forgetLights();
   }
   drawStatic();
   drawDynamic();
@@ -806,6 +859,7 @@ void handleTap(int16_t tx, int16_t ty) {
     return;
   }
   if (page == PAGE_PANEL) {
+    if (panelWait) return;                           // เพิ่งโผล่มาหน้านี้ — แตะนี้เล็งมาตอนจอยังเป็นหน้าอื่น
     if (inRect(tx, ty, PI_CHIP_HIT)) { gotoPage(PAGE_PI); return; }
     for (int i = 0; i < N_LIGHTS; i++)
       if (inRect(tx, ty, gridCell(N_LIGHTS, i))) { tapLight(i); return; }
@@ -861,18 +915,30 @@ void setup() {
 }
 
 void loop() {
-  // --- touch: นับ "จังหวะแตะลง" เท่านั้น — กดค้างไม่ยิงซ้ำ (ไฟจะกระพริบติด-ดับรัว ๆ ตามนิ้วที่ค้าง) ---
+  // --- touch: 1 แตะ = 1 คำสั่ง. นับ "จังหวะแตะลง" เท่านั้น — กดค้างไม่ยิงซ้ำ (ไฟจะกระพริบติด-ดับรัว ๆ ตามนิ้วที่ค้าง).
+  // จอ resistive อ่านแรงกดทีละ sample ไม่เฉลี่ย: นิ้วที่แตะเบา ๆ มี sample "ไม่แตะ" หลุดมากลางคันได้ และ sample "แตะ"
+  // หลอนเดี่ยว ๆ ก็มีได้ → ทั้งแตะลงและยกนิ้วต้องเห็นหลาย sample ติดกัน ไม่เชื่อ sample เดียว.
+  // "ช่วงว่างนิ้ว" จับเวลาจาก sample "ไม่แตะ" ตัวแรกของช่วง ไม่ใช่จาก sample "แตะ" ตัวสุดท้าย: loop รอบที่ค้างรอ HTTP
+  // กินเวลาเป็นวินาทีได้โดยไม่ได้อ่านจอ — ถ้านับจากตัวสุดท้าย sample หลุดตัวเดียวหลังรอบแบบนั้นจะกลายเป็น "ยกนิ้วแล้ว"
+  // และนิ้วเดิมที่ยังค้างอยู่ถูกนับเป็นแตะครั้งใหม่ (เจอจริงในตัวจำลอง: แตะปลุกจอค้าง 0.6 วิ → ไฟถูกสั่ง).
   int16_t tx, ty;
   if (readTouch(tx, ty)) {
-    if (!touchHeld && millis() - lastTapMs >= TAP_GAP_MS) {
+    quietCount = 0;
+    if (pressCount < PRESS_SAMPLES) pressCount++;
+    if (!touchHeld && pressCount >= PRESS_SAMPLES && millis() - lastTapMs >= TAP_GAP_MS) {
       touchHeld = true;
-      lastTapMs = lastActivity = millis();
+      lastActivity = millis();
       Serial.printf("touch raw=(%d,%d) -> screen=(%d,%d) page=%d\n", rawX, rawY, tx, ty, page);
       handleTap(tx, ty);
+      lastTapMs = millis();                          // นับช่องว่างจาก "ตอนคำสั่งทำเสร็จ" (คำสั่งที่ block นานไม่กินช่องว่างไป)
     }
-    lastTouchSeen = millis();                        // (หลัง handleTap: คำสั่งที่ block นานไม่นับเป็น "ยกนิ้วแล้ว")
-  } else if (touchHeld && millis() - lastTouchSeen >= RELEASE_MS) {
-    touchHeld = false;
+  } else {
+    pressCount = 0;
+    if (quietCount == 0) quietSince = millis();
+    if (quietCount < 1000) quietCount++;
+    unsigned long quiet = millis() - quietSince;
+    if (touchHeld && quietCount >= RELEASE_SAMPLES && quiet >= RELEASE_MS) touchHeld = false;
+    if (panelWait && quietCount >= PANEL_QUIET_SAMPLES && quiet >= PANEL_QUIET_MS) panelWait = false;
   }
   if (confirmUntil && millis() > confirmUntil) {     // หมดเวลายืนยัน → กลับปุ่มแดง
     confirmUntil = 0;

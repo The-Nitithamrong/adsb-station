@@ -37,28 +37,63 @@ static void haPrep(HTTPClient& http, const char* token, uint16_t timeoutMs) {
   http.addHeader("Authorization", String("Bearer ") + token);
 }
 
-static bool haService(const char* haBase, const char* token, const char* service,
-                      const char* entity, uint16_t timeoutMs) {
+// อ่าน body ไม่เกิน n-1 ไบต์ ภายใน timeoutMs แล้วปิดท้ายด้วย \0 (เรียกหลัง GET/POST คืน 200). คืนจำนวนไบต์ที่ได้.
+// ใช้แทน http.getString() ทุกที่: getString วนอ่านจน "ครบ Content-Length" ตราบใดที่ connection ยังเปิด — ปลายทางที่
+// ส่ง header แล้วค้าง (Pi แฮงก์กลางคำตอบ คืออาการที่ watchdog ตัวนี้มีไว้กู้พอดี) อาจทำให้ loop() ไม่กลับมาอีกเลย
+// และ backstop ตายเงียบ ๆ ไปด้วย — แบบเดียวกับ PUSH HANG ของ Pixoo. ตรงนี้มีเส้นตายของตัวเอง: ครบเวลา = เลิก.
+// ขนาดจำกัดก็พอ: ทุกคำตอบที่เราอ่าน ค่าที่ต้องการอยู่ในร้อยไบต์แรก.
+static size_t httpReadBody(HTTPClient& http, char* buf, size_t n, uint16_t timeoutMs) {
+  size_t got = 0, cap = n - 1;
+  int len = http.getSize();                          // Content-Length · -1 = server ไม่บอก
+  if (len >= 0 && (size_t)len < cap) cap = (size_t)len;
+  WiFiClient* c = http.getStreamPtr();
+  unsigned long t0 = millis();
+  while (c && got < cap && millis() - t0 < timeoutMs) {
+    int avail = c->available();
+    if (avail > 0) {
+      size_t want = (size_t)avail < cap - got ? (size_t)avail : cap - got;
+      int r = c->read((uint8_t*)buf + got, want);
+      if (r <= 0) break;
+      got += (size_t)r;
+    } else if (!c->connected()) {
+      break;                                         // ปลายทางปิดแล้วและไม่มีอะไรค้างให้อ่าน
+    } else {
+      delay(2);
+    }
+  }
+  buf[got] = 0;
+  return got;
+}
+
+// คืนรหัส HTTP (<= 0 = ต่อไม่ได้)
+static int haService(const char* haBase, const char* token, const char* service,
+                     const char* entity, uint16_t timeoutMs) {
   HTTPClient http;
-  if (!http.begin(String(haBase) + "/api/services/homeassistant/" + service)) return false;
+  if (!http.begin(String(haBase) + "/api/services/homeassistant/" + service)) return 0;
   haPrep(http, token, timeoutMs);
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(String("{\"entity_id\":\"") + entity + "\"}");
   http.end();
-  return code >= 200 && code < 300;
+  return code;
 }
 
 // สั่งเปิด/ปิดแบบระบุปลายทาง — homeassistant.turn_on/turn_off ใช้ได้ทั้ง light.* และ switch.*
 // (HA ส่งต่อให้ domain ของ entity เอง: https://www.home-assistant.io/actions/homeassistant.turn_on/)
+// *httpCode (ถ้าให้มา) = รหัส HTTP — ผู้เรียกใช้แยก "token ไม่ผ่าน" ออกจาก "สั่งไม่สำเร็จ" เฉย ๆ
 static bool haSwitch(const char* haBase, const char* token, const char* entity,
-                     bool on, uint16_t timeoutMs = 5000) {
-  return haService(haBase, token, on ? "turn_on" : "turn_off", entity, timeoutMs);
+                     bool on, uint16_t timeoutMs = 5000, int* httpCode = nullptr) {
+  int code = haService(haBase, token, on ? "turn_on" : "turn_off", entity, timeoutMs);
+  if (httpCode) *httpCode = code;
+  return code >= 200 && code < 300;
 }
 
 // สลับ — ใช้เฉพาะตอน "ไม่รู้สถานะปัจจุบัน". รู้สถานะแล้วให้ใช้ haSwitch: คำสั่งแบบระบุปลายทางสั่งซ้ำได้
 // ไม่มีผลข้างเคียง ส่วน toggle ที่ยิงตอนจอโชว์ค่าเก่า (มีคนกดสวิตช์ผนังไปก่อน) จะได้ผลตรงข้ามกับที่ตั้งใจ.
-static bool haToggle(const char* haBase, const char* token, const char* entity, uint16_t timeoutMs = 5000) {
-  return haService(haBase, token, "toggle", entity, timeoutMs);
+static bool haToggle(const char* haBase, const char* token, const char* entity,
+                     uint16_t timeoutMs = 5000, int* httpCode = nullptr) {
+  int code = haService(haBase, token, "toggle", entity, timeoutMs);
+  if (httpCode) *httpCode = code;
+  return code >= 200 && code < 300;
 }
 
 // อ่านสถานะ entity → 1 = on · 0 = off · -1 = ไม่รู้ (unavailable/unknown/อ่านไม่ได้).
@@ -72,7 +107,14 @@ static int haState(const char* haBase, const char* token, const char* entity,
   haPrep(http, token, timeoutMs);
   int code = http.GET();
   *httpCode = code;
-  int st = (code == 200) ? parseHaState(http.getString().c_str()) : -1;
+  int st = -1;
+  if (code == 200) {
+    char body[256];                                  // "state" เป็น key ที่ 2 ของ JSON — อยู่ในร้อยไบต์แรกเสมอ
+    if (httpReadBody(http, body, sizeof(body), timeoutMs) == 0)
+      *httpCode = 0;                                 // ตอบ 200 แต่ไม่ส่ง body มาเลย = HA ไม่ได้ตอบจริง → ให้ผู้เรียกพักถาม
+    else
+      st = parseHaState(body);                       // body โดนตัดกลางค่า → แกะไม่ได้ → -1 (ไม่รู้) ไม่ใช่ค่าผิด
+  }
   http.end();
   return st;
 }
