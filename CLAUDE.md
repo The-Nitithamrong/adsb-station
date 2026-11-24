@@ -349,20 +349,68 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   (`:8099`, `Type=simple` `Restart=always`) that serves the Pi's `/proc/uptime` seconds as plain text so
   the ESP32 display watchdog can show REAL Pi uptime ("Pi up 1D 4H") — it only pings TCP:22 otherwise and
   can't read uptime. Also routes `/coffee` (read), `/coffee/toggle|on|off` (write `/home/arin/pixoo_coffee`)
-  so the ESP32 COFFEE button turns the Pixoo coffee-break on/off at runtime. Display-only + best-effort: NOT
+  so the ESP32 COFFEE button turns the Pixoo coffee-break on/off at runtime, and `/weather` — the forecast
+  `weather_fetch.py` already wrote, re-shaped by `weather_text()` into plain-text lines for the ESP32
+  screensaver: `wx1 <ts>` then `H|D <src> <label> <date> <kind> <tmax> <tmin> <rain_mm> <rain_pct>`
+  (`-` = no value; `H` = one line per home day, `D` = the destination's arrival day). Text, not JSON, for the
+  same reason as `/` — the ESP32 splits on spaces, no JSON library. It sends EVERY home day with its date and
+  does NOT judge staleness: the ESP32 picks "today" with its own clock and applies the 6 h rule itself, exactly
+  as the Pixoo does, so midnight rolls over on the device and a Pi outage does not blank today's forecast.
+  The endpoint only reads `/run` — the Pi stays the one thing that talks to TMD/Open-Meteo, so no TMD token
+  and no home location ever reach the ESP32. Temps are rounded with the same `int(round())` as the Pixoo WX
+  page so the two displays can never disagree. Missing/broken file → `wx1 0` ("Pi says no data", which is a
+  different fact from "could not reach the Pi"). Display-only + best-effort: NOT
   the watchdog's liveness check (that stays TCP:22; an
   app-level server can crash while the Pi is fine → false reset). It's a `.service` not a `.timer`, so
   autoupdate auto-enables it (daemon service = `Type=simple`, no paired `.timer`, has `[Install]`) within
   ~1 extra cycle — no SSH needed. to keep it off use the drop-in pause above (`systemctl mask` does not work here).
-- `watchdog-esp32-display/` — ESP32 CYD2USB (ST7789 240×320 + touch) watchdog with a screen: NORMAL mode
-  pings Pi TCP:22 every 30s → silent >15 min → power-cycle; BACKUP mode = on-screen RESET button (2-tap).
-  Cuts power via ONE HA webhook (HA automation does turn_off→delay→turn_on; HA must be a SEPARATE box from
-  the Pi it cuts). Screen shows Pi OK/DOWN, "Pi up" (from adsb-uptime endpoint), "last check HH:MM:SS".
-  Display rotates 2 pages every `PAGE_SWITCH_MS` (5 min): clock ↔ Pi-status (the RESET-button page); tapping
-  the clock page jumps to status immediately so RESET is always reachable; monitoring runs regardless of page.
-  Status page also has a COFFEE ON/OFF button (top-right) that toggles the Pixoo coffee-break via the Pi's
-  `:8099 /coffee/toggle` endpoint (polls `/coffee` each check to stay in sync).
-  PlatformIO build flags (no User_Setup.h); DRY_RUN=1 tests UI without firing HA. `src/config.h` gitignored.
+- `watchdog-esp32-display/` — ESP32 CYD2USB (ST7789 240×320 + touch): **room light panel + weather
+  screensaver, with the Pi watchdog still running underneath** (folder name kept — the watchdog never left).
+  Three pages: PANEL (1–6 light buttons from `LIGHTS_INIT`, auto grid) · SAVER (clock + forecast, after
+  `IDLE_MS`=45 s without a touch) · PI (the old watchdog page: Pi OK/DOWN, "Pi up", RESET PI 2-tap, COFFEE —
+  reached from the `Pi OK >` chip on PANEL).
+  WATCHDOG IS UNCHANGED AND PAGE-INDEPENDENT: TCP:22 every 30 s → silent `DOWN_MS` (20 min) → ONE HA webhook
+  (HA automation does turn_off→delay→turn_on; HA must be a SEPARATE box from the Pi it cuts) → `COOLDOWN_MS`.
+  Proven by running the previous firmware and this one through the same scripted 75-min outage: webhook at
+  20.06 / 46.16 / 72.26 min in both. Those three numbers are asserted in `sim/` — a change that moves them
+  has changed when the Pi's power gets cut.
+  TWO PATHS TO HA, SPLIT ON PURPOSE: lights = REST API + long-lived token (`haSwitch`/`haToggle`/`haState`);
+  power cut = the tokenless webhook. A revoked/expired token must cost the light buttons, never the backstop.
+  REST (not a webhook per light) because a webhook cannot report state back. Knowing the state is also what
+  makes a tap safe: it sends an EXPLICIT `homeassistant.turn_on`/`turn_off` for what the screen shows; a blind
+  toggle fired from a stale display (someone just used the wall switch) does the opposite of what was meant.
+  `toggle` only when the state is unknown. After a command the commanded state is shown at once and polls
+  for that light are ignored for `LIGHT_SETTLE_MS` — cloud (Tuya) devices report back late and the button
+  would otherwise flick back.
+  State is polled ONE light per loop pass, round-robin (`LIGHT_REFRESH_MS` for the full set), and ONLY while
+  PANEL is showing — each request blocks the single-threaded loop, so one short block at a time keeps touch
+  responsive, and the screensaver sends HA nothing at all.
+  FAILURES NAME THEMSELVES (never just "?" everywhere): `HA OFFLINE` (no response, retry 15 s) · `HA TOKEN?`
+  (401/403, retry 60 s — every bad attempt is logged by HA as a failed login) · `NO ENTITY` on the one button
+  whose entity_id is wrong (404) · red `ERROR` when a command was not accepted. On any HA-wide fault every
+  light becomes unknown rather than showing a state that can no longer be confirmed.
+  TOUCH IS EDGE-TRIGGERED: one press = one command however long the finger stays (the watchdog-only firmware
+  re-fired every 250 ms — harmless for a 2-tap RESET, a strobe for a light). The touch that wakes the
+  screensaver only wakes — it is never forwarded as a button press.
+  GOTCHA (timeouts): `HTTPClient::setTimeout` is the READ timeout only. Without `setConnectTimeout` a dead
+  host blocks for the TCP stack's default — and on this firmware a blocked loop = dead touchscreen. Every
+  request sets both (`haPrep`, `piInfoTimeouts`), and the coffee poll is skipped while the Pi is known down.
+  The watchdog-only firmware had neither and nobody noticed, because there was nothing to press.
+  GOTCHA (token scope): creating the token from a non-admin HA user keeps it out of HA's *configuration*, but
+  it can still control EVERY entity, the Pi's plug included — HA's admin flag does not scope entity control.
+  So `LIGHTS_INIT` must never list the Pi's plug or the HA box's plug: a light button has no confirm step and
+  nothing turns the plug back on.
+  Weather = same forecast as the Pixoo WX page, fetched from the Pi's `:8099/weather` on the watchdog's own
+  check (only when the Pi just answered, so it can never delay the liveness check). Icons are the Pixoo's 7×7
+  bitmaps scaled up, same colours — the two displays read as one system.
+  `src/panel_logic.h` = the pure logic (HA state parser, weather parser, grid) with no Arduino dependency so
+  it compiles and unit-tests on a PC. `sim/` runs the REAL `src/main.cpp` on a PC against stubbed
+  display/touch/WiFi/HTTP with a virtual clock (`make -C sim test`; `make -C sim shots` renders every page to
+  PNG). `.github/workflows/esp32-build.yml` runs that plus a real PlatformIO build on every change here —
+  this firmware is flashed by hand (no autoupdate), so that is its only gate.
+  PlatformIO build flags (no User_Setup.h); DRY_RUN=1 tests RESET PI without firing HA (lights always act for
+  real). `src/config.h` gitignored (WiFi pass + HA token); an old watchdog-era config.h fails the build with a
+  message naming the three missing defines (`HA_BASE`, `HA_TOKEN`, `LIGHTS_INIT`).
 
 ## Runtime data contract (JSON in /run, world-readable — NOT secret)
 - `/run/fr24-watchdog/status.json` — written by watchdog each run (root; chmod 644 so pixoo/arin reads):
@@ -386,6 +434,7 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   code, kind}` (`rain_pct` null from TMD; `kind` ∈ clear/partly/cloudy/rain/heavy/storm/fog/snow/cool/hot).
   `src` = `TMD` | `OM`. Pixoo picks home = today's date (live, so it rolls over at midnight), dest = `date`;
   no matching day → `--` (dest beyond the forecast horizon gets `note: "beyond"`). Stale after `WX_STALE_SEC`.
+  Second consumer: `deploy/uptime_server.py` `/weather` → the ESP32 panel's screensaver (same picking rules).
 - `/run/pixoo/status.json` — written by pixoo/main.py (arin; via `RuntimeDirectory=pixoo` +
   `RuntimeDirectoryPreserve=yes`): `{ts, ip}` stamped on every successful push, throttled to ~30s.
   Preserve=yes matters: if the file vanished when the service stopped, "just died" and "dead for three
@@ -401,6 +450,8 @@ Raspberry Pi 5 ADS-B ground station (Bangkok, Khlong Sam Wa). Three jobs:
   The same file also holds NON-secret host config that DHCP can move under us — `MQTT_HOST`, `PIXOO_IP` —
   so a device changing address is a one-line edit + restart, not a code change waiting on a merge.
   (GCAL_ICS_URL is a private calendar link — treat as secret; anyone with it reads your calendar.)
+  The ESP32 panel's secrets (WiFi pass, HA long-lived token, webhook id) live in
+  `watchdog-esp32-display/src/config.h` on the machine that flashes it — gitignored, never on the Pi.
 - Deploy model: the Pi runs `git pull`. Do not hand-edit files on the Pi.
   - GOTCHA: `fr24-watchdog.sh` runs from `/usr/local/bin/` and unit files from `/etc/systemd/system/` —
     `git pull` does NOT update those. After changing them, `cp` into place + restart / `daemon-reload`.

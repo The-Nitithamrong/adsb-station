@@ -1,19 +1,19 @@
-# ESP32 display watchdog — touchscreen Pi reset (CYD2USB / ESP32-2432S028Rv3)
+# ESP32 room panel — ปุ่มไฟในห้อง + screensaver อากาศ + Pi watchdog (CYD2USB / ESP32-2432S028Rv3)
 
-Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-2432S028Rv3 ("CYD2USB", 2 USB ports)** — จอ 2.8" **ST7789**
-240×320 + touch XPT2046. Config นี้ **verified บนฮาร์ดแวร์จริง** (ขอบคุณ know-how ของเจ้าของบอร์ด).
+จอทัชบนบอร์ด **Sunton ESP32-2432S028Rv3 ("CYD2USB", 2 USB ports)** — จอ 2.8" **ST7789** 240×320 +
+touch XPT2046. เดิมเป็น watchdog อย่างเดียว ตอนนี้หน้าจอเป็น **panel เปิด/ปิดไฟในห้อง** ส่วน
+**watchdog ยังทำงานเบื้องหลังเหมือนเดิมทุกอย่าง** (ชื่อโฟลเดอร์จึงยังเป็น `watchdog-esp32-display`).
 
-**2 โหมดในเครื่องเดียว:**
-- **NORMAL (อัตโนมัติ)** — เฝ้า Pi (TCP `:22`) ทุก 30 วิ. เงียบเกิน **20 นาที** → ยิง webhook power-cycle เอง
-- **BACKUP (มือกด)** — แตะปุ่ม **RESET PI** บนจอ (กดยืนยัน 2 ครั้ง) → ยิง **1 webhook** → HA ตัด→รอ 60 วิ→เปิดเอง
+| หน้า | โชว์อะไร | เข้ายังไง |
+|---|---|---|
+| **PANEL** | ปุ่มไฟ 1–6 ปุ่ม สีเหลือง = เปิด · เข้ม = ปิด (มีคำ `ON`/`OFF` กำกับเสมอ) | หน้าหลัก |
+| **SAVER** | นาฬิกา + พยากรณ์อากาศ (วันนี้ที่บ้าน · 2 วันถัดไป · ปลายทางของเที่ยวบินถัดไป) | ไม่แตะจอ 45 วิ (`IDLE_MS`) |
+| **PI** | Pi OK/DOWN, uptime, ปุ่ม **RESET PI** (ยืนยัน 2 ครั้ง), ปุ่ม **COFFEE** | แตะป้าย `Pi OK >` มุมขวาบนของ PANEL |
 
-**จอสลับ 2 หน้าทุก 5 นาที** (`PAGE_SWITCH_MS` ใน main.cpp): **นาฬิกา** (เวลา+วันที่ตัวใหญ่) ↔ **Pi status**
-(หน้าที่มีปุ่ม RESET). แตะหน้านาฬิกาที่ไหนก็ได้ = เด้งไปหน้า status ทันที (ปุ่ม RESET พร้อมใช้เสมอ).
-การเฝ้า/auto-reset ทำงานตลอดไม่ว่ากำลังโชว์หน้าไหน.
-
-**ปุ่ม COFFEE** (มุมขวาบนหน้า status): แตะเพื่อ **เปิด/ปิด coffee break ของ Pixoo** — ยิงไป
-`http://<pi>:8099/coffee/toggle` (endpoint เดียวกับ uptime, `adsb-uptime.service`) → เขียนไฟล์
-`/home/arin/pixoo_coffee` ที่ `pixoo/main.py` อ่าน runtime. ต้องมี `adsb-uptime` รันบน Pi (ดูหัวข้อ Pi uptime).
+- **แตะจอตอนเป็น screensaver = กลับหน้า PANEL อย่างเดียว** ยังไม่สั่งไฟ (กันแตะปลุกจอแล้วไฟดับ)
+- **กดค้าง = 1 คำสั่ง** ไม่ยิงซ้ำตามนิ้ว
+- ปุ่มรู้ **สถานะจริง** ของไฟ: กดจากสวิตช์ผนังหรือแอป จอก็ตามเองภายใน ~4 วิ (`LIGHT_REFRESH_MS`)
+- watchdog: เฝ้า Pi (TCP `:22`) ทุก 30 วิ **ไม่ว่าจออยู่หน้าไหน** — เงียบเกิน **20 นาที** → ยิง webhook power-cycle เอง
 
 > เวอร์ชันไม่มีจอ (MicroPython) อยู่ที่ `../watchdog-esp32/` สำหรับ ESP32 เปล่า
 
@@ -21,24 +21,90 @@ Watchdog แบบมีจอ+ทัช บนบอร์ด **Sunton ESP32-24
 - **Rv3 = ST7789 ไม่ใช่ ILI9341** (แยกจาก Rv1/Rv2). ตั้งไว้ใน `platformio.ini` แล้ว
 - **USB-C ของบอร์ดไม่มี CC resistor** → สาย C-to-C **ไม่จ่ายไฟเลย** (เหมือนบอร์ดตาย) → **ใช้ micro-USB** หรือ USB-A→C. อย่าเสียบ 2 USB พร้อมกัน
 - จอ = HSPI · touch = **VSPI (bus แยก)** — ตั้งในโค้ด/flags แล้ว
-- **ESP32 ต้องเสียบไฟคนละแหล่งกับ Pi** (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด) + ปลั๊กตั้ง **power-on state = ON**
-- ใช้ปลั๊ก **Tuya v3.3** (v3.4/3.5 tuya.h นี้ไม่รองรับ)
+- **ESP32 ต้องเสียบไฟคนละแหล่งกับ Pi** (ห้ามเสียบปลั๊ก Tuya ตัวที่มันจะตัด) + ปลั๊กของ Pi ตั้ง **power-on state = ON**
 
-## คุมปลั๊กยังไง: HA Webhook เดียว (default)
-โปรเจกต์นี้สั่ง power-cycle ผ่าน **Home Assistant Webhook เดียว** (`src/ha_switch.h` → `haWebhook`) — **ไม่ต้องมี token/auth**
-(secret อยู่ใน URL เอง). ESP32 → HTTP POST webhook **1 ครั้ง** → HA automation เดียวทำ **turn_off → delay 60 วิ → turn_on** ครบวงจร.
-**HA เป็นคนจับเวลา** ไม่ใช่ ESP32 → ถ้า ESP32 หลุด WiFi หลังยิงไปแล้ว ปลั๊กก็เปิดกลับเอง (ทนกว่าแบบ 2 webhook).
+## คุยกับ Home Assistant 2 ทาง — แยกกันโดยตั้งใจ
+| งาน | ทาง | ทำไม |
+|---|---|---|
+| ปุ่มไฟ | **REST API + long-lived token** (`haSwitch` / `haToggle` / `haState` ใน `src/ha_switch.h`) | webhook อ่านสถานะกลับไม่ได้ — ปุ่มที่ไม่รู้ว่าไฟเปิดหรือปิดอยู่ใช้งานไม่ได้ |
+| ตัดไฟ Pi | **Webhook เดียว ไม่มี token** (`haWebhook`) | token หมดอายุ/ถูกลบ ต้องเสียแค่ปุ่มไฟ ไม่ใช่ backstop |
+
+เพราะรู้สถานะ ปุ่มจึงสั่งแบบ **ระบุปลายทาง** (`homeassistant.turn_on` / `turn_off` ตามที่จอโชว์) ไม่ใช่ toggle:
+ถ้าจอยังโชว์ค่าเก่าเพราะมีคนเพิ่งกดสวิตช์ผนัง toggle จะได้ผลตรงข้ามกับที่ตั้งใจ ส่วนคำสั่งระบุปลายทางสั่งซ้ำได้ไม่มีผลข้างเคียง.
+ใช้ toggle เฉพาะตอนสถานะเป็น `?` (ไม่รู้).
+
+อ้างอิง: [HA REST API](https://developers.home-assistant.io/docs/api/rest) (`GET /api/states/<entity_id>`,
+`POST /api/services/<domain>/<service>`) · [homeassistant.turn_on](https://www.home-assistant.io/actions/homeassistant.turn_on/)
+(ใช้ได้ทุก domain — `light.*` และ `switch.*` ใช้ปุ่มแบบเดียวกันได้)
+
+## ตั้งค่าปุ่มไฟ
+1. **สร้าง token** — HA → รูปโปรไฟล์ (มุมซ้ายล่าง) → **Security** → Long-lived access tokens → Create token
+   (โชว์ครั้งเดียว, อายุ 10 ปี — [Authentication API](https://developers.home-assistant.io/docs/auth_api/)).
+   แนะนำให้สร้างจาก **user แยกที่ไม่ใช่ admin** (Settings → People → Add person → Allow login, ปิด Administrator
+   → login เป็น user นั้นแล้วค่อยสร้าง token): token จะแตะการตั้งค่าของ HA ไม่ได้ และยกเลิกได้ด้วยการลบ user เดียว.
+   ⚠️ **แต่ยังสั่ง entity ได้ทุกตัวเท่ากับ admin** รวมถึงปลั๊กของ Pi — ใน HA สิทธิ์ admin คุมแค่ "การตั้งค่า"
+   ไม่ได้จำกัดว่าสั่งอุปกรณ์ตัวไหนได้ ([People and user configuration](https://www.home-assistant.io/docs/configuration/user-configuration/),
+   [Permissions](https://developers.home-assistant.io/docs/auth_permissions/)). ความปลอดภัยจริงจึงมาจาก token อยู่ใน
+   `src/config.h` ซึ่ง **ไม่อยู่ใน git** และ HA รับเฉพาะใน LAN.
+2. **หา entity_id จริง** — HA → Developer Tools → States → ก๊อป `light.xxx` / `switch.xxx` (ห้ามเดา)
+3. ใส่ใน `src/config.h`:
+   ```c
+   #define HA_BASE   "http://192.168.41.207:8123"     // เครื่องที่รัน HA (Pi#2)
+   #define HA_TOKEN  "eyJ..."
+   #define LIGHTS_INIT { \
+     {"CEILING", "light.bedroom_ceiling"}, \
+     {"LAMP",    "switch.desk_lamp"}, \
+   }
+   ```
+   1–6 ปุ่ม จอจัดตารางเอง (1 = เต็มจอ · 2 = 2×1 · 3–4 = 2×2 · 5–6 = 3×2). ชื่อปุ่มเป็น **อังกฤษ/ตัวเลขเท่านั้น**
+   (font บนจอไม่มีภาษาไทย); ≤ 7 ตัวอักษรได้ตัวใหญ่ในตาราง 3×2 ยาวกว่านั้นตัวเล็กลงเอง.
+
+⚠️ **ห้ามใส่ปลั๊กของ Pi หรือปลั๊กของเครื่องที่รัน HA ใน `LIGHTS_INIT`** — ปุ่มไฟกดทีเดียวมีผลทันที ไม่มีขั้นยืนยัน
+และไม่มีใครเปิดกลับให้ (ต่างจาก RESET PI ที่ HA จับเวลาเปิดคืนเอง).
+
+### จอบอกอะไรเมื่อมีปัญหา
+| บนจอ | แปลว่า | แก้ที่ |
+|---|---|---|
+| ปุ่มขึ้น `NO ENTITY` | HA ตอบ 404 — ไม่มี entity_id นี้ | `LIGHTS_INIT` (ก๊อป id ใหม่จาก Developer Tools → States) |
+| ปุ่มขึ้น `?` ดวงเดียว | HA ตอบว่า `unavailable`/`unknown` | ตัวอุปกรณ์/integration ใน HA (เช่น Tuya หลุด) |
+| `HA TOKEN?` + ทุกปุ่ม `?` | HA ตอบ 401/403 | `HA_TOKEN` (ถูกลบ/ก๊อปไม่ครบ) — จอถามซ้ำแค่นาทีละครั้ง เพราะทุกครั้งที่ผิด HA จด login failed |
+| `HA OFFLINE` + ทุกปุ่ม `?` | ต่อ HA ไม่ได้เลย | `HA_BASE` / เครื่อง HA ดับ / IP เปลี่ยน — ลองใหม่เองทุก 15 วิ |
+| ปุ่มแดง `ERROR` ~1 วิ | สั่งแล้ว HA ไม่รับ | เหมือนสองแถวบน — จอไม่ทำเป็นว่าเปลี่ยนสำเร็จ |
+| จุดมุมขวาบนเป็นสีแดง | WiFi ของ ESP32 เองหลุด | `WIFI_*` / router |
+
+## Screensaver — พยากรณ์อากาศ
+ใช้พยากรณ์ **ชุดเดียวกับหน้า WX ของ Pixoo**: `weather/weather_fetch.py` บน Pi เขียน `/run/weather/forecast.json`
+(ในไทย = กรมอุตุฯ TMD · ต่างประเทศ = Open-Meteo) แล้ว `adsb-uptime.service` เสิร์ฟต่อที่
+`http://<pi>:8099/weather` เป็นข้อความบรรทัดละวัน (ดู `weather_text()` ใน `deploy/uptime_server.py`).
+ESP32 ไม่ถือ token ของ TMD และไม่รู้พิกัดบ้าน — Pi เป็นตัวเดียวที่คุยกับแหล่งข้อมูล.
+
+- แถวกลาง = **วันนี้ที่บ้าน** (ESP32 เลือกวันจากนาฬิกาของมันเอง → ข้ามเที่ยงคืนเปลี่ยนวันเอง)
+- แถวล่าง = **2 วันถัดไป** + **ปลายทางของเที่ยวบินถัดไป** (`TPE 27/11` = พยากรณ์ของ *วันที่บินถึง* ไม่ใช่วันนี้)
+- ไอคอน/สี สูงสุด-ต่ำสุด เป็นชุดเดียวกับ Pixoo (ขยายจาก 7×7 px) · มุมขวาบอกที่มา `TMD` / `OM`
+- `--` = ไม่มีพยากรณ์ของวันนั้น (ไม่เดา) · `NO FLIGHT` = ไม่มีเที่ยวบินถัดไปในปฏิทิน
+- `WEATHER: NO DATA` = ข้อมูลเก่ากว่า 6 ชม. (เกณฑ์เดียวกับ Pixoo) / ยังดึงไม่ได้ / นาฬิกายังไม่ sync NTP
+- บรรทัดล่างสุดยังบอก `Pi OK` / `Pi DOWN 12m (reset at 20m)` / `WiFi DOWN` เสมอ
+
+**ลำดับ deploy:** merge ขึ้น `main` ก่อน → Pi (autoupdate) ได้ route `/weather` เอง → แล้วค่อย flash ESP32.
+flash ก่อนก็ไม่พัง — screensaver แค่ขึ้น `WEATHER: NO DATA` จนกว่า Pi จะอัปเดต. เช็คด้วย
+`curl -s http://192.168.41.241:8099/weather` (บรรทัดแรกต้องขึ้นต้น `wx1 <ตัวเลขไม่ใช่ 0>`).
+
+## Watchdog — ตัดไฟ Pi ผ่าน HA Webhook เดียว
+ESP32 → HTTP POST webhook **1 ครั้ง** → HA automation เดียวทำ **turn_off → delay 60 วิ → turn_on** ครบวงจร.
+**HA เป็นคนจับเวลา** ไม่ใช่ ESP32 → ถ้า ESP32 หลุด WiFi หลังยิงไปแล้ว ปลั๊กก็เปิดกลับเอง.
 
 ⚠️ **กฎเหล็ก: HA ต้องอยู่คนละเครื่องกับ Pi ที่จะตัด** — ถ้า HA รันบน Pi ตัวที่ถูกตัด: สั่ง OFF → Pi ดับ →
-HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้างดับถาวร**. ดังนั้น:
-- **ตอนนี้ (HA ยังบน ADS-B Pi)** → automation ให้ตัด **ปลั๊ก/switch ตัวอื่น** เท่านั้น (เช่น พัดลม/spare)
-- **watchdog จริง (ตัดปลั๊ก ADS-B Pi)** → ทำได้เมื่อ **ย้าย HA ไป Pi อีกตัว** (HA อยู่คนละเครื่อง = ตัดปลอดภัย)
+HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้างดับถาวร** (ดู `../deploy/homeassistant/MIGRATE_HA_TO_PI2.md`).
 
-*(ทางเลือก: `haSwitch` (token) + `src/tuya.h` (direct Tuya v3.3 local) ยังมีให้ ถ้าอยากใช้แทน webhook)*
+automation สำเร็จรูป: `../deploy/homeassistant/automations/pi1-power-cycle.yaml` (วางใน HA → แก้ `webhook_id` +
+`entity_id`) แล้วเอา URL `http://192.168.41.207:8123/api/webhook/<webhook_id>` ใส่ `HA_WEBHOOK_CYCLE`.
+ทดสอบจาก PC: `curl -X POST http://192.168.41.207:8123/api/webhook/<id>` → ปลั๊กควรดับแล้วติดกลับใน 60 วิ.
+
+**ปุ่ม COFFEE** (หน้า PI): เปิด/ปิด coffee break ของ Pixoo — ยิง `http://<pi>:8099/coffee/toggle`.
 
 ## Build — PlatformIO (ไม่ใช่ Arduino IDE)
-โครง PlatformIO: `platformio.ini` + `src/main.cpp` + `src/tuya.h`. TFT_eSPI/LVGL ตั้งผ่าน **build flags**
-(ไม่มี `User_Setup.h`, ไม่มี `lv_conf.h` — โปรเจกต์นี้**ไม่ใช้ LVGL** วาดด้วย TFT_eSPI ตรงๆ เบา RAM).
+โครง PlatformIO: `platformio.ini` + `src/`. TFT_eSPI ตั้งผ่าน **build flags** (ไม่มี `User_Setup.h`,
+ไม่ใช้ LVGL — วาดด้วย TFT_eSPI ตรงๆ เบา RAM).
 
 1. เปิดโฟลเดอร์ `watchdog-esp32-display/` ใน VS Code + PlatformIO (ต้องเปิดโฟลเดอร์ที่มี `platformio.ini`)
 2. `lib_deps` ลงเอง: **TFT_eSPI 2.5.43** + **XPT2046_Touchscreen v1.4**
@@ -46,65 +112,50 @@ HA ตายตาม → สั่ง ON ไม่ได้ → **Pi ค้า�
    auto-detect อาจเลือกผิดอุปกรณ์ (เช่นชน CP210x ตัวอื่น). ยืนยัน log ว่าพอร์ตถูกก่อน flash
 4. `upload_speed = 115200` (อย่าขึ้น 921600 — CH340 นี้ไม่นิ่ง)
 
-## ตั้ง HA — สร้าง 1 webhook automation (off → delay → on)
-Settings → Automations → **Create automation** → (ข้าม / Start with empty) → **Edit in YAML** วางแบบนี้
-(แก้ `webhook_id` กับ `entity_id` เป็นของคุณ):
-```yaml
-alias: Pi power-cycle
-trigger:
-  - platform: webhook
-    webhook_id: xxxxxxxx        # ได้จาก HA — จะไปอยู่ท้าย URL
-    allowed_methods: [POST]
-    local_only: true           # รับเฉพาะใน LAN (ปลอดภัยขึ้น)
-action:
-  - service: homeassistant.turn_off
-    target: { entity_id: switch.ปลั๊กทดสอบ }
-  - delay: { seconds: 60 }     # ตั้งให้ตรงกับ OFF_SECONDS ในโค้ด
-  - service: homeassistant.turn_on
-    target: { entity_id: switch.ปลั๊กทดสอบ }
-mode: single                   # กันยิงซ้ำระหว่างกำลัง cycle
-```
-เอา URL (`http://192.168.41.241:8123/api/webhook/<webhook_id>`) ไปใส่ `HA_WEBHOOK_CYCLE`
-- ⚠️ `entity_id` = **ปลั๊กตัวอื่น** ไม่ใช่ปลั๊กของ Pi ที่รัน HA
-- ทดสอบจาก PC: `curl -X POST http://192.168.41.241:8123/api/webhook/<id>` → ปลั๊กควรดับแล้วติดกลับใน 60 วิ (webhook คืน 200 เสมอ)
-
-## Pi uptime จริงบนจอ (ออปชัน) — endpoint บน Pi
-บรรทัด **"Pi up"** บนจอดึง uptime จริงของ Pi จาก `adsb-uptime.service` (HTTP `:8099`, stdlib).
-ถ้ายังไม่ขึ้นจะโชว์ `Pi up -- (info svc?)`.
-
-**ถ้ารัน `adsb-autoupdate` อยู่แล้ว → ไม่ต้องทำอะไร** — autoupdate จะ `cp` unit + `enable --now adsb-uptime`
-ให้เองภายใน ~2 รอบ (มันรู้จัก daemon service ใหม่แล้ว). เช็คด้วย `curl -s http://192.168.41.241:8099/`
-
-ถ้าไม่ได้รัน autoupdate → ติดตั้งเองครั้งเดียว:
 ```bash
-cd ~/adsb-station && git pull
-sudo cp systemd/adsb-uptime.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now adsb-uptime
-curl -s http://192.168.41.241:8099/          # ควรได้ตัวเลขวินาที uptime
+cp src/config.h.example src/config.h     # ครั้งแรก — แล้วแก้ WIFI_*, HA_*, LIGHTS_INIT, HA_WEBHOOK_CYCLE
 ```
+**มี `config.h` จากรุ่น watchdog อยู่แล้ว:** ไม่ต้องเริ่มใหม่ — เพิ่ม 3 ค่า `HA_BASE`, `HA_TOKEN`, `LIGHTS_INIT`
+(ก๊อปบล็อกจาก `config.h.example`) ค่าเดิมใช้ต่อได้หมด. ถ้าลืม build จะหยุดพร้อมบอกว่าขาดตัวไหน.
 
-## ตั้งค่า + flash
+Build + Upload → Serial Monitor 115200 → จอขึ้น `LIGHTS` + ปุ่ม.
+
+## ทดสอบหลัง flash (ไล่ตามลำดับ)
+1. **ปุ่มไฟ**: ปุ่มขึ้น `ON`/`OFF` ตรงกับไฟจริง → แตะ → ไฟเปลี่ยน + ปุ่มเปลี่ยนสี → กดสวิตช์ผนัง → ปุ่มตามเองใน ~4 วิ
+2. **Screensaver**: ไม่แตะ 45 วิ → นาฬิกา + อากาศ → แตะ 1 ครั้ง → กลับหน้าปุ่ม โดย **ไฟไม่เปลี่ยน**
+3. **หน้า PI** (`DRY_RUN 1` ไว้ก่อน): แตะ `Pi OK >` → RESET PI → TAP AGAIN (ส้ม) → แตะซ้ำใน 3 วิ → countdown
+   ขึ้น "DRY RUN - no real cut" → ค่อยตั้ง `DRY_RUN 0`
+4. **auto** (ถ้าอยากเห็นกับตา): ลด `DOWN_MS` เป็น `120000UL` ชั่วคราว → ทำ Pi เข้าไม่ถึง → รอ 2 นาที → power-cycle
+   เอง → **คืน `1200000UL`**
+
+## ทดสอบโดยไม่ต้องมีบอร์ด — `sim/`
+`sim/` รัน `src/main.cpp` **ตัวจริง** บน PC กับฮาร์ดแวร์ปลอม (จอ/ทัช/WiFi/HTTP) ด้วยนาฬิกาจำลอง:
+8 ชั่วโมงจำลองจบในไม่ถึงวินาที. ต้องมีแค่ `g++`.
 ```bash
-cp src/config.h.example src/config.h     # แก้ WIFI_*, PI_IP, HA_WEBHOOK_CYCLE
+make -C sim test      # unit test + scenario ทั้งหมด (CI รันชุดเดียวกันนี้)
+make -C sim shots     # + ภาพหน้าจอทุกหน้าเป็น PNG ใน sim/build/shots/ (ต้องมี python3 + Pillow)
 ```
-Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควรเห็นจอขึ้น "Pi WATCHDOG" + สถานะ
+สิ่งที่มันยืนยันทุกครั้งที่โค้ดเปลี่ยน: Pi เงียบ → webhook ที่ 20.06 / 46.16 / 72.26 นาที (เท่ากับ firmware รุ่น
+watchdog ล้วน), Pi กลับมาหรือ WiFi ของ ESP32 เองหลุด = ไม่ตัด, แตะปลุกจอไม่สั่งไฟ, กดค้าง = 1 คำสั่ง,
+จอโชว์ค่าเก่าแล้วแตะ = ไม่กลับด้าน, อยู่หน้า screensaver = ไม่ถาม HA เลย, และระหว่าง Pi ดับปุ่มไฟยังกดติด.
+ภาพใน `shots/` ใช้ขนาดตัวอักษรจริงของ font บนจอ (ตรวจการล้น/ทับได้) แต่รูปร่างตัวอักษรเป็นของ font บน PC.
+
+`.github/workflows/esp32-build.yml` รัน sim + **build ด้วย PlatformIO จริง** ทุกครั้งที่โฟลเดอร์นี้เปลี่ยน —
+firmware นี้ flash ด้วยมือ ไม่มี autoupdate จึงเป็นด่านเดียวก่อนถึงบอร์ด.
 
 ## Touch calibration
 ค่าในโค้ด (`TOUCH_X_MIN/MAX`, `TOUCH_Y_MIN/MAX` = 338/3676/505/3465) **วัดจริงที่ rotation 1** ของบอร์ดนี้
 (ไม่ swap/invert). ถ้าปุ่มกดไม่ตรง แตะจอดู Serial `touch raw=...` แล้วปรับ 4 ค่านั้น.
 **เปลี่ยน `setRotation` = ค่าพวกนี้ใช้ไม่ได้ ต้องวัดใหม่** (calibration ผูกกับ rotation).
 
-## ทดสอบ
-- **ยังไม่มี key ก็ทดสอบได้**: ตั้ง `DRY_RUN 1` (ค่าเริ่มต้นใน config) → จอ/ทัช/WiFi/เฝ้า Pi + ปุ่ม→ยืนยัน→
-  countdown ทำงานครบ **โดยไม่ยิง Tuya จริง** (โชว์ "DRY RUN - no real cut"). พอได้ `TUYA_KEY` แล้วตั้ง `DRY_RUN 0`
-- **manual**: แตะ RESET PI → TAP AGAIN (ส้ม) → แตะซ้ำใน 3 วิ → (DRY_RUN=0) Tuya OFF + นับถอยหลัง 60 → ON
-- **auto**: ลด `DOWN_MS` เป็น `120000UL` (2 นาที) ชั่วคราว → ทำ Pi เข้าไม่ถึง → รอ 2 นาที → power-cycle เอง → คืน `1200000UL`
-
 ## Troubleshooting (จาก field notes)
 - **สีเพี้ยน** → ตรวจ `-DST7789_DRIVER -DTFT_RGB_ORDER=TFT_BGR -DTFT_INVERSION_OFF` ใน platformio.ini
 - **จอไม่ขึ้น** → เช็ค `TFT_BL=21` (active HIGH) + ST7789 driver + สาย micro-USB (ไม่ใช่ C-to-C)
 - **ทัชไม่ตอบ/ไม่ตรง** → touch ต้องอยู่ **VSPI** (pin 25/33/32/39/36) + rotation ตรงกับ calibration
-- **ปลั๊กไม่ขยับ** → curl ทดสอบ webhook (`curl -X POST .../api/webhook/<id>`), เช็ค automation ใน HA ว่า target ปลั๊กถูก + enabled
+- **ปุ่มไฟ** → ดูตาราง "จอบอกอะไรเมื่อมีปัญหา" ข้างบน. ทดสอบ token จาก PC:
+  `curl -H "Authorization: Bearer <token>" http://192.168.41.207:8123/api/states/<entity_id>`
+- **ปลั๊ก Pi ไม่ขยับตอน RESET** → curl ทดสอบ webhook, เช็ค automation ใน HA ว่า target ปลั๊กถูก + enabled
+- **`Pi up -- (info svc?)`** → `adsb-uptime.service` บน Pi ไม่ตอบ (`curl -s http://192.168.41.241:8099/`)
 - **flash ผิดอุปกรณ์** → pin `upload_port` เสมอ, ยืนยันพอร์ตก่อน flash
 
 ## ตำแหน่งใน pi-fleet — ESP32 คือ backstop สุดท้าย
@@ -114,16 +165,15 @@ Build + Upload (PlatformIO) → เปิด Serial Monitor 115200 → ควร
 |---|---|---|---|---|
 | 1 | `fr24-watchdog` | Pi#1 | กู้ dongle ระดับแอป (L1 restart → L2 uhubctl) | Pi#1 ยังปกติ |
 | 2 | `peer-watchdog` | Pi#2 | เงียบ → L1 MQTT → L2 ssh → **L3 ตัดไฟ 600s** + รอ 240s | Pi#2 + broker + MQTT healthy |
-| 3 | **ESP32 (ตัวนี้)** | แยกเครื่อง | TCP:22 เงียบ **20 นาที** → ตัดไฟ + ปุ่มมือ | **ไม่พึ่งอะไรเลย** |
+| 3 | **ESP32 (ตัวนี้)** | แยกเครื่อง | TCP:22 เงียบ **20 นาที** → ตัดไฟ + ปุ่มมือ | HA (webhook) เท่านั้น — ไม่พึ่ง MQTT/token |
 
 **ทำไม 20 นาที ไม่ใช่ 15:** peer-watchdog (ชั้น 2) ตัดไฟที่ 600s + รอ 240s + Pi boot ~120s ≈ **16 นาที**.
 ESP32 ที่ 15 นาทีจะยิง**ซ้อน**ตอน Pi กำลัง boot จากการตัดของชั้น 2. เลื่อนเป็น 20 นาที → ESP32 ยิงเฉพาะเมื่อ
-ชั้น 2 ลองครบแล้วเอาไม่อยู่ **หรือ** Pi#2/broker เองก็ตาย (ชั้น 2 ทำอะไรไม่ได้เลย → ESP32 เป็นทางเดียวที่กู้ได้).
+ชั้น 2 ลองครบแล้วเอาไม่อยู่ **หรือ** peer-watchdog/broker เองก็ตาย.
 ESP32 **ตั้งใจไม่พึ่ง MQTT** — จะได้กู้ได้แม้ทั้ง fleet ล่ม.
 
 **ให้การตัดไฟของ ESP32 โผล่ใน `fleet/incident`** (โดยไม่ต้องแตะโค้ด ESP32): ใน HA automation ที่รับ
-webhook power-cycle เพิ่ม action `mqtt.publish` topic `fleet/incident` ก่อนตัดไฟ เช่น
-`{"level":"error","station":"pi-adsb","msg":"power-cut via HA webhook (peer-watchdog L3 หรือ ESP32 backstop)"}`.
+webhook power-cycle เพิ่ม action `mqtt.publish` topic `fleet/incident` ก่อนตัดไฟ (`pi1-power-cycle.yaml` มีให้แล้ว).
 แยกว่าใครสั่ง: ถ้า peer-watchdog เป็นคนตัด มันจะ log incident ของตัวเอง**ก่อน**เรียก webhook อยู่แล้ว →
 เห็น incident ของ peer-watchdog คู่กับของ HA = ชั้น 2 สั่ง; เห็นแต่ของ HA เดี่ยวๆ = **ESP32 สั่ง**.
 
